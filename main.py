@@ -194,7 +194,8 @@ def destination_nav_url(m: Dict[str, Any]) -> Optional[str]:
             return None
         latf = float(lat)
         lonf = float(lon)
-        return f"https://www.google.com/maps/search/?api=1&query={latf},{lonf}"
+        # Directions screen (better than plain search pin)
+        return f"https://www.google.com/maps/dir/?api=1&destination={latf},{lonf}&travelmode=driving"
     except Exception:
         return None
 
