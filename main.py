@@ -363,8 +363,8 @@ def _sheet_to_map_locations(ws) -> Dict[str, Dict[str, Any]]:
 
     headers = [_clean_header(h) for h in header_row]
 
-    code_i = _find_col(headers, ["code", "locationcode", "loccode", "stationcode", "facilitycode", "destcode"])
-    city_i = _find_col(headers, ["city", "town", "name", "locationname"])
+    code_i = _find_col(headers, ["dest", "code", "locationcode", "loccode", "stationcode", "facilitycode", "destcode"])
+    city_i = _find_col(headers, ["city", "town", "name", "locationname", "location"])
     country_i = _find_col(headers, ["country", "land"])
     lat_i = _find_col(headers, ["lat", "latitude"])
     lon_i = _find_col(headers, ["lon", "lng", "long", "longitude"])
@@ -399,8 +399,8 @@ def _sheet_to_map_destland(ws) -> Dict[str, Dict[str, Any]]:
         return out
 
     headers = [_clean_header(h) for h in header_row]
-    code_i = _find_col(headers, ["code", "locationcode", "loccode", "stationcode", "facilitycode", "destcode"])
-    city_i = _find_col(headers, ["city", "town", "name", "locationname"])
+    code_i = _find_col(headers, ["dest", "code", "locationcode", "loccode", "stationcode", "facilitycode", "destcode"])
+    city_i = _find_col(headers, ["city", "town", "name", "locationname", "location"])
     country_i = _find_col(headers, ["country", "land"])
 
     if code_i is None:
@@ -519,23 +519,31 @@ def resolve_destination(rec: Dict[str, Any]) -> Tuple[str, Optional[float], Opti
     city = ""
     country = ""
 
-    # 3) Lookup from FedEx_locations.xlsx (best source because it also gives coords)
-    if code_n and code_n in LOCATION_BY_CODE:
-        row = LOCATION_BY_CODE[code_n]
-        city = str(row.get("city") or "").strip()
-        country = str(row.get("country") or "").strip()
-        if lat is None:
-            lat = row.get("lat")
-        if lon is None:
-            lon = row.get("lon")
+    # 3) Lookups
+    loc_row = LOCATION_BY_CODE.get(code_n) if code_n else None
+    dl_row = DESTLAND_BY_CODE.get(code_n) if code_n else None
 
-    # 4) Fallback: dest-land.xlsx (city/country only)
-    if code_n and (not city or not country) and code_n in DESTLAND_BY_CODE:
-        row = DESTLAND_BY_CODE[code_n]
+    # Coordinates: best source is FedEx_locations.xlsx
+    if loc_row:
+        if lat is None:
+            lat = loc_row.get("lat")
+        if lon is None:
+            lon = loc_row.get("lon")
+
+    # City/Country: prefer dest-land.xlsx because it contains clean city names
+    if dl_row:
+        city = str(dl_row.get("city") or "").strip()
+        country = str(dl_row.get("country") or "").strip()
+
+    # Fallback for city/country (if dest-land missing)
+    if loc_row:
         if not city:
-            city = str(row.get("city") or "").strip()
+            city = str(loc_row.get("city") or "").strip()
+            # common pattern: "ARH Depot Elst" -> remove leading "ARH "
+            if code_n and city.upper().startswith(code_n + " "):
+                city = city[len(code_n) + 1:].strip()
         if not country:
-            country = str(row.get("country") or "").strip()
+            country = str(loc_row.get("country") or "").strip()
 
     # 5) Build display text
     if city and country and code_n:
