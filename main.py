@@ -637,10 +637,61 @@ INDEX_HTML = r"""<!doctype html>
       border: 1px solid rgba(0,0,0,0.08);
       box-shadow: 0 10px 30px rgba(0,0,0,0.10);
     }
-    input, button { font-size: 16px; padding: 10px; }
-    button { cursor: pointer; }
+    input {
+      font-size: 16px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(0,0,0,0.18);
+      background: rgba(255,255,255,0.60);
+      outline: none;
+    }
+    input:focus {
+      border-color: rgba(77,20,140,0.55);
+      box-shadow: 0 0 0 3px rgba(77,20,140,0.18);
+    }
+
+    .btn {
+      font-size: 16px;
+      padding: 10px 16px;
+      border-radius: 12px;
+      border: none;
+      cursor: pointer;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      box-shadow: 0 10px 18px rgba(0,0,0,0.18);
+      transition: transform 0.08s ease, filter 0.15s ease, box-shadow 0.15s ease;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:hover {
+      filter: brightness(1.08);
+      transform: translateY(-1px);
+      box-shadow: 0 12px 22px rgba(0,0,0,0.22);
+    }
+    .btn:active {
+      transform: translateY(0px);
+      filter: brightness(0.98);
+      box-shadow: 0 8px 14px rgba(0,0,0,0.18);
+    }
+    .btn:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(77,20,140,0.24), 0 10px 18px rgba(0,0,0,0.18);
+    }
+
+    .btn-primary {
+      color: #ffffff;
+      background: linear-gradient(180deg, rgba(104,68,232,1) 0%, rgba(60,32,170,1) 100%);
+    }
+
+    .btn-secondary {
+      color: rgba(25,25,35,1);
+      background: linear-gradient(180deg, rgba(245,245,255,0.70) 0%, rgba(220,220,235,0.45) 100%);
+      border: 1px solid rgba(255,255,255,0.35);
+    }
     .row { display: flex; gap: 8px; }
     .row > * { flex: 1; }
+    .row-main > input { flex: 1 1 auto; }
+    .row-main > button { flex: 0 0 120px; }
     .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin-top: 12px; background: rgba(255,255,255,0.45); }
     .muted { color: #666; }
     .status-big { font-size: 22px; font-weight: 700; line-height: 1.25; }
@@ -655,13 +706,13 @@ INDEX_HTML = r"""<!doctype html>
     <div class="topcard">
       <h2 style="margin: 6px 0 12px;">Movement status by license plate</h2>
 
-      <div class="row">
+      <div class="row row-main">
         <input id="plate" placeholder="Enter license plate (e.g. AB-123-CD)" />
-        <button id="btn">Check</button>
+        <button id="btn" class="btn btn-primary">Check</button>
       </div>
 
       <div class="row" style="margin-top: 8px;">
-        <button id="btnNotify" style="display:none;">Enable notifications</button>
+        <button id="btnNotify" class="btn btn-secondary" style="display:none;">Enable notifications</button>
       </div>
 
       <div id="out" class="card" style="display:none;"></div>
