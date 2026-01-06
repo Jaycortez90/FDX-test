@@ -42,18 +42,19 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-# Background image path used by the website:
-# Put your uploaded image into: static/bg.png
-# (same folder as this main.py, inside "static")
+# Background image used by the website:
+# Put your background image into: static/bg.png
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Excel lookup files (server-side destination calculation)
-LOCATIONS_XLSX = os.path.join(DATA_DIR, "FedEx_locations.xlsx")
-DEST_LAND_XLSX = os.path.join(DATA_DIR, "dest-land.xlsx")
+# You can also override these with environment variables.
+LOCATIONS_XLSX_ENV = os.environ.get("FEDEX_LOCATIONS_XLSX", "").strip()
+DEST_LAND_XLSX_ENV = os.environ.get("DEST_LAND_XLSX", "").strip()
 
 # Loaded at startup
 LOCATION_BY_CODE: Dict[str, Dict[str, Any]] = {}
 DESTLAND_BY_CODE: Dict[str, Dict[str, Any]] = {}
+LOOKUP_PATHS: Dict[str, str] = {"locations": "", "dest_land": ""}
 
 # =============================
 # Geofence (QAR Duiven) - still enforced, but NOT displayed on website
@@ -66,8 +67,13 @@ MAX_LOCATION_AGE_SECONDS = 120
 
 # =============================
 # Upload secret (required for desktop uploads)
+# Backwards-compatible: ADMIN_UPLOAD_SECRET OR DRIVER_PORTAL_UPLOAD_SECRET
 # =============================
-ADMIN_UPLOAD_SECRET = os.environ.get("ADMIN_UPLOAD_SECRET", "").strip()
+ADMIN_UPLOAD_SECRET = (
+    os.environ.get("ADMIN_UPLOAD_SECRET", "").strip()
+    or os.environ.get("DRIVER_PORTAL_UPLOAD_SECRET", "").strip()
+    or os.environ.get("UPLOAD_SECRET", "").strip()
+)
 
 # =============================
 # Web Push (optional)
@@ -316,13 +322,40 @@ def _safe_float(v: Any) -> Optional[float]:
         return None
 
 
-def _load_xlsx_map_locations(path: str) -> Dict[str, Dict[str, Any]]:
-    out: Dict[str, Dict[str, Any]] = {}
-    if not _OPENPYXL_OK or not os.path.exists(path):
-        return out
+def _pick_existing_path(candidates: List[str]) -> str:
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return ""
 
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)  # type: ignore
-    ws = wb.active
+
+def _locations_path() -> str:
+    # Prefer env var, otherwise try common locations
+    candidates = [
+        LOCATIONS_XLSX_ENV,
+        os.path.join(DATA_DIR, "FedEx_locations.xlsx"),
+        os.path.join(DATA_DIR, "FedEx_locations.xlsm"),
+        os.path.join(BASE_DIR, "FedEx_locations.xlsx"),
+        os.path.join(os.getcwd(), "data", "FedEx_locations.xlsx"),
+        os.path.join(os.getcwd(), "FedEx_locations.xlsx"),
+    ]
+    return _pick_existing_path(candidates)
+
+
+def _dest_land_path() -> str:
+    candidates = [
+        DEST_LAND_XLSX_ENV,
+        os.path.join(DATA_DIR, "dest-land.xlsx"),
+        os.path.join(DATA_DIR, "dest_land.xlsx"),
+        os.path.join(BASE_DIR, "dest-land.xlsx"),
+        os.path.join(os.getcwd(), "data", "dest-land.xlsx"),
+        os.path.join(os.getcwd(), "dest-land.xlsx"),
+    ]
+    return _pick_existing_path(candidates)
+
+
+def _sheet_to_map_locations(ws) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
     rows = ws.iter_rows(values_only=True)
     header_row = next(rows, None)
     if not header_row:
@@ -358,13 +391,8 @@ def _load_xlsx_map_locations(path: str) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def _load_xlsx_map_destland(path: str) -> Dict[str, Dict[str, Any]]:
+def _sheet_to_map_destland(ws) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
-    if not _OPENPYXL_OK or not os.path.exists(path):
-        return out
-
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)  # type: ignore
-    ws = wb.active
     rows = ws.iter_rows(values_only=True)
     header_row = next(rows, None)
     if not header_row:
@@ -394,15 +422,39 @@ def _load_xlsx_map_destland(path: str) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def _load_xlsx_any_sheet(path: str, loader_fn) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    if not _OPENPYXL_OK or not path or not os.path.exists(path):
+        return out
+
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)  # type: ignore
+    # Try every sheet; pick the first that contains a valid "code" column.
+    for name in wb.sheetnames:
+        try:
+            ws = wb[name]
+            tmp = loader_fn(ws)
+            if tmp:
+                return tmp
+        except Exception:
+            continue
+
+    return out
+
+
 def _load_destination_lookups() -> None:
-    global LOCATION_BY_CODE, DESTLAND_BY_CODE
+    global LOCATION_BY_CODE, DESTLAND_BY_CODE, LOOKUP_PATHS
+
+    loc_path = _locations_path()
+    dl_path = _dest_land_path()
+    LOOKUP_PATHS = {"locations": loc_path, "dest_land": dl_path}
+
     try:
-        LOCATION_BY_CODE = _load_xlsx_map_locations(LOCATIONS_XLSX)
+        LOCATION_BY_CODE = _load_xlsx_any_sheet(loc_path, _sheet_to_map_locations)
     except Exception:
         LOCATION_BY_CODE = {}
 
     try:
-        DESTLAND_BY_CODE = _load_xlsx_map_destland(DEST_LAND_XLSX)
+        DESTLAND_BY_CODE = _load_xlsx_any_sheet(dl_path, _sheet_to_map_destland)
     except Exception:
         DESTLAND_BY_CODE = {}
 
@@ -416,46 +468,68 @@ def _extract_code_from_text(v: Any) -> str:
     if "(" in s and s.endswith(")"):
         inside = s.split("(")[-1].replace(")", "").strip()
         inside = _norm_code(inside)
-        if 2 <= len(inside) <= 8:
+        if 2 <= len(inside) <= 10:
             return inside
 
     # If the whole thing looks like a code
     compact = _norm_code(s)
-    if 2 <= len(compact) <= 8 and any(ch.isalpha() for ch in compact):
+    if 2 <= len(compact) <= 10 and any(ch.isalpha() for ch in compact):
         return compact
 
     # Otherwise take last token if it looks like a code
     parts = [p for p in s.replace(",", " ").replace("/", " ").split() if p]
     if parts:
         last = _norm_code(parts[-1])
-        if 2 <= len(last) <= 8 and any(ch.isalpha() for ch in last):
+        if 2 <= len(last) <= 10 and any(ch.isalpha() for ch in last):
             return last
 
     return ""
 
 
+def _first_nonempty(rec: Dict[str, Any], keys: List[str]) -> Any:
+    for k in keys:
+        if k in rec and _has(rec.get(k)):
+            return rec.get(k)
+    return None
+
+
 def resolve_destination(rec: Dict[str, Any]) -> Tuple[str, Optional[float], Optional[float]]:
-    # Prefer explicit destination_code if your snapshot has it
-    raw_code = rec.get("destination_code")
-    if not raw_code:
-        # Try other common fields or the ROCS "Destination" text
-        raw_code = rec.get("destination") or rec.get("Destination") or rec.get("destination_text") or rec.get("DestinationText")
+    """
+    Returns: (destination_text, lat, lon)
+    destination_text should be: "City, Country (CODE)" when possible.
+    """
+
+    # 1) Determine destination code from the snapshot (many possible field names)
+    raw_code = _first_nonempty(rec, [
+        "dest_code", "DestCode", "DEST_CODE",
+        "destination_code", "DestinationCode", "DESTINATION_CODE",
+        "dest", "Dest", "DEST",
+        "destination", "Destination",
+        "destination_text", "DestinationText",
+        "dest_text", "DestText", "DEST_TEXT",
+    ])
 
     code = _extract_code_from_text(raw_code)
     code_n = _norm_code(code)
 
+    # 2) Coordinates: prefer snapshot coordinates if provided, otherwise lookup
+    lat = _safe_float(_first_nonempty(rec, ["dest_lat", "DestLat", "destination_lat", "DestinationLat", "lat_dest", "LatDest"]))
+    lon = _safe_float(_first_nonempty(rec, ["dest_lon", "DestLon", "destination_lon", "DestinationLon", "lon_dest", "LonDest"]))
+
     city = ""
     country = ""
-    lat = None
-    lon = None
 
+    # 3) Lookup from FedEx_locations.xlsx (best source because it also gives coords)
     if code_n and code_n in LOCATION_BY_CODE:
         row = LOCATION_BY_CODE[code_n]
         city = str(row.get("city") or "").strip()
         country = str(row.get("country") or "").strip()
-        lat = row.get("lat")
-        lon = row.get("lon")
+        if lat is None:
+            lat = row.get("lat")
+        if lon is None:
+            lon = row.get("lon")
 
+    # 4) Fallback: dest-land.xlsx (city/country only)
     if code_n and (not city or not country) and code_n in DESTLAND_BY_CODE:
         row = DESTLAND_BY_CODE[code_n]
         if not city:
@@ -463,18 +537,18 @@ def resolve_destination(rec: Dict[str, Any]) -> Tuple[str, Optional[float], Opti
         if not country:
             country = str(row.get("country") or "").strip()
 
-    # Build display text
+    # 5) Build display text
     if city and country and code_n:
-        text = f"{city}, {country} ({code_n})"
+        dest_text = f"{city}, {country} ({code_n})"
     elif city and country:
-        text = f"{city}, {country}"
+        dest_text = f"{city}, {country}"
     elif code_n:
-        text = code_n
+        dest_text = code_n
     else:
         # absolute fallback: keep whatever came from snapshot
-        text = str(rec.get("destination_text") or rec.get("destination") or rec.get("Destination") or "-")
+        dest_text = str(_first_nonempty(rec, ["destination_text", "dest_text", "destination", "Destination"]) or "-")
 
-    return text, lat, lon
+    return dest_text, lat, lon
 
 
 # -----------------------------
@@ -486,18 +560,22 @@ def health() -> Dict[str, Any]:
         "ok": True,
         "push_enabled": PUSH_ENABLED,
         "snapshot_loaded": bool(SNAPSHOT),
+        "openpyxl_ok": _OPENPYXL_OK,
         "lookup_locations_loaded": len(LOCATION_BY_CODE),
         "lookup_destland_loaded": len(DESTLAND_BY_CODE),
-        "openpyxl_ok": _OPENPYXL_OK,
+        "lookup_paths": LOOKUP_PATHS,
     }
 
 
 @app.post("/api/upload")
-async def upload_snapshot(request: Request, secret: str = Query(..., min_length=8)) -> Dict[str, Any]:
+async def upload_snapshot(request: Request, secret: str = Query(..., min_length=4)) -> Dict[str, Any]:
     global SNAPSHOT, LAST_STATUS_KEY_BY_PLATE
 
     if not ADMIN_UPLOAD_SECRET:
-        raise HTTPException(status_code=500, detail="Server not configured: ADMIN_UPLOAD_SECRET missing.")
+        raise HTTPException(
+            status_code=500,
+            detail="Server not configured: missing ADMIN_UPLOAD_SECRET (or DRIVER_PORTAL_UPLOAD_SECRET).",
+        )
     if secret != ADMIN_UPLOAD_SECRET:
         raise HTTPException(status_code=401, detail="Unauthorized.")
 
@@ -637,6 +715,7 @@ INDEX_HTML = r"""<!doctype html>
       border: 1px solid rgba(0,0,0,0.08);
       box-shadow: 0 10px 30px rgba(0,0,0,0.10);
     }
+
     input {
       font-size: 16px;
       padding: 10px 12px;
@@ -688,11 +767,19 @@ INDEX_HTML = r"""<!doctype html>
       background: linear-gradient(180deg, rgba(245,245,255,0.70) 0%, rgba(220,220,235,0.45) 100%);
       border: 1px solid rgba(255,255,255,0.35);
     }
+
     .row { display: flex; gap: 8px; }
     .row > * { flex: 1; }
     .row-main > input { flex: 1 1 auto; }
     .row-main > button { flex: 0 0 120px; }
-    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin-top: 12px; background: rgba(255,255,255,0.45); }
+
+    .card {
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      padding: 14px;
+      margin-top: 12px;
+      background: rgba(255,255,255,0.45);
+    }
     .muted { color: #666; }
     .status-big { font-size: 22px; font-weight: 700; line-height: 1.25; }
     .ok { border-color: #bfe6c3; }
@@ -764,6 +851,7 @@ INDEX_HTML = r"""<!doctype html>
         loc = await getLocation();
       } catch (e) {
         show(`<b>Location error:</b> ${e.message}<div class="muted">Enable GPS and allow location permission.</div>`, "err");
+        document.getElementById("btnNotify").style.display = "none";
         return;
       }
 
