@@ -4,10 +4,11 @@ import os
 import time
 import math
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Query, Request, Body
 from fastapi.responses import HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 try:
     from pywebpush import webpush
@@ -21,11 +22,41 @@ try:
 except Exception:
     _DATEUTIL_OK = False
 
+try:
+    import openpyxl  # type: ignore
+    _OPENPYXL_OK = True
+except Exception:
+    openpyxl = None  # type: ignore
+    _OPENPYXL_OK = False
 
-app = FastAPI(title="Driver Status (Geofence)")
+
+app = FastAPI(title="Driver Status")
 
 # =============================
-# Geofence (QAR Duiven)
+# Paths (data + static)
+# =============================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(STATIC_DIR, exist_ok=True)
+
+# Background image path used by the website:
+# Put your uploaded image into: static/bg.png
+# (same folder as this main.py, inside "static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# Excel lookup files (server-side destination calculation)
+LOCATIONS_XLSX = os.path.join(DATA_DIR, "FedEx_locations.xlsx")
+DEST_LAND_XLSX = os.path.join(DATA_DIR, "dest-land.xlsx")
+
+# Loaded at startup
+LOCATION_BY_CODE: Dict[str, Dict[str, Any]] = {}
+DESTLAND_BY_CODE: Dict[str, Dict[str, Any]] = {}
+
+# =============================
+# Geofence (QAR Duiven) - still enforced, but NOT displayed on website
 # =============================
 HUB_NAME = "QAR Duiven"
 HUB_LAT = 51.9672245
@@ -55,8 +86,14 @@ SUBSCRIPTIONS_BY_PLATE: Dict[str, List[Dict[str, Any]]] = {}
 
 STATUS_POLL_INTERVAL_SECONDS = 60
 
+
+# -----------------------------
+# Startup
+# -----------------------------
 @app.on_event("startup")
-async def _startup_status_poller():
+async def _startup():
+    _load_destination_lookups()
+
     # Periodically re-evaluate statuses so time-based changes (45 min threshold)
     # can trigger push even without new uploads.
     if not PUSH_ENABLED:
@@ -87,10 +124,19 @@ async def _startup_status_poller():
     asyncio.create_task(_loop())
 
 
+# -----------------------------
+# Helpers
+# -----------------------------
 def normalize_plate(value: str) -> str:
     v = (value or "").upper().strip()
     v = v.replace(" ", "").replace("-", "")
     return v
+
+
+def _norm_code(value: Any) -> str:
+    s = str(value or "").strip().upper()
+    s = s.replace(" ", "").replace("-", "")
+    return s
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -105,7 +151,7 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return r * c
 
 
-def geofence_check(lat: float, lon: float, ts: int) -> Dict[str, Any]:
+def geofence_check(lat: float, lon: float, ts: int) -> None:
     now = int(time.time())
     if abs(now - int(ts)) > MAX_LOCATION_AGE_SECONDS:
         raise HTTPException(status_code=401, detail="Location timestamp too old. Refresh and try again.")
@@ -113,8 +159,6 @@ def geofence_check(lat: float, lon: float, ts: int) -> Dict[str, Any]:
     dist = haversine_km(float(lat), float(lon), HUB_LAT, HUB_LON)
     if dist > float(GEOFENCE_RADIUS_KM):
         raise HTTPException(status_code=403, detail=f"Access denied (outside {GEOFENCE_RADIUS_KM:.0f} km of {HUB_NAME}).")
-
-    return {"hub_name": HUB_NAME, "distance_km": dist, "radius_km": float(GEOFENCE_RADIUS_KM)}
 
 
 def _parse_dt(val: Any) -> Optional[datetime]:
@@ -186,15 +230,12 @@ def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def destination_nav_url(m: Dict[str, Any]) -> Optional[str]:
-    lat = m.get("destination_lat")
-    lon = m.get("destination_lon")
+def destination_nav_url(lat: Optional[float], lon: Optional[float]) -> Optional[str]:
     try:
         if lat is None or lon is None:
             return None
         latf = float(lat)
         lonf = float(lon)
-        # Directions screen (better than plain search pin)
         return f"https://www.google.com/maps/dir/?api=1&destination={latf},{lonf}&travelmode=driving"
     except Exception:
         return None
@@ -235,18 +276,219 @@ def _push_to_plate(plate: str, title: str, body: str) -> None:
             )
             alive.append(sub)
         except Exception:
-            # Drop dead subscriptions silently
             pass
 
     SUBSCRIPTIONS_BY_PLATE[plate] = alive
 
 
+# -----------------------------
+# Excel lookup loading (server-side destination calc)
+# -----------------------------
+def _clean_header(v: Any) -> str:
+    s = str(v or "").strip().lower()
+    for ch in [" ", "-", "_", "/", "\\", "(", ")", "[", "]", "{", "}", ".", ",", ":"]:
+        s = s.replace(ch, "")
+    return s
+
+
+def _find_col(headers: List[str], candidates: List[str]) -> Optional[int]:
+    # exact
+    for c in candidates:
+        if c in headers:
+            return headers.index(c)
+    # contains
+    for i, h in enumerate(headers):
+        for c in candidates:
+            if c in h:
+                return i
+    return None
+
+
+def _safe_float(v: Any) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        s = str(v).strip()
+        if not s or s.lower() in {"nan", "none", "nat"}:
+            return None
+        return float(s)
+    except Exception:
+        return None
+
+
+def _load_xlsx_map_locations(path: str) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    if not _OPENPYXL_OK or not os.path.exists(path):
+        return out
+
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)  # type: ignore
+    ws = wb.active
+    rows = ws.iter_rows(values_only=True)
+    header_row = next(rows, None)
+    if not header_row:
+        return out
+
+    headers = [_clean_header(h) for h in header_row]
+
+    code_i = _find_col(headers, ["code", "locationcode", "loccode", "stationcode", "facilitycode", "destcode"])
+    city_i = _find_col(headers, ["city", "town", "name", "locationname"])
+    country_i = _find_col(headers, ["country", "land"])
+    lat_i = _find_col(headers, ["lat", "latitude"])
+    lon_i = _find_col(headers, ["lon", "lng", "long", "longitude"])
+
+    if code_i is None:
+        return out
+
+    for r in rows:
+        try:
+            code = _norm_code(r[code_i] if code_i < len(r) else "")
+            if not code:
+                continue
+
+            city = str(r[city_i]).strip() if (city_i is not None and city_i < len(r) and r[city_i] is not None) else ""
+            country = str(r[country_i]).strip() if (country_i is not None and country_i < len(r) and r[country_i] is not None) else ""
+
+            lat = _safe_float(r[lat_i] if (lat_i is not None and lat_i < len(r)) else None)
+            lon = _safe_float(r[lon_i] if (lon_i is not None and lon_i < len(r)) else None)
+
+            out[code] = {"code": code, "city": city, "country": country, "lat": lat, "lon": lon}
+        except Exception:
+            continue
+
+    return out
+
+
+def _load_xlsx_map_destland(path: str) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    if not _OPENPYXL_OK or not os.path.exists(path):
+        return out
+
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)  # type: ignore
+    ws = wb.active
+    rows = ws.iter_rows(values_only=True)
+    header_row = next(rows, None)
+    if not header_row:
+        return out
+
+    headers = [_clean_header(h) for h in header_row]
+    code_i = _find_col(headers, ["code", "locationcode", "loccode", "stationcode", "facilitycode", "destcode"])
+    city_i = _find_col(headers, ["city", "town", "name", "locationname"])
+    country_i = _find_col(headers, ["country", "land"])
+
+    if code_i is None:
+        return out
+
+    for r in rows:
+        try:
+            code = _norm_code(r[code_i] if code_i < len(r) else "")
+            if not code:
+                continue
+
+            city = str(r[city_i]).strip() if (city_i is not None and city_i < len(r) and r[city_i] is not None) else ""
+            country = str(r[country_i]).strip() if (country_i is not None and country_i < len(r) and r[country_i] is not None) else ""
+
+            out[code] = {"code": code, "city": city, "country": country}
+        except Exception:
+            continue
+
+    return out
+
+
+def _load_destination_lookups() -> None:
+    global LOCATION_BY_CODE, DESTLAND_BY_CODE
+    try:
+        LOCATION_BY_CODE = _load_xlsx_map_locations(LOCATIONS_XLSX)
+    except Exception:
+        LOCATION_BY_CODE = {}
+
+    try:
+        DESTLAND_BY_CODE = _load_xlsx_map_destland(DEST_LAND_XLSX)
+    except Exception:
+        DESTLAND_BY_CODE = {}
+
+
+def _extract_code_from_text(v: Any) -> str:
+    s = str(v or "").strip().upper()
+    if not s or s.lower() in {"nan", "none", "nat"}:
+        return ""
+
+    # If it ends like "... (QAR)" take inside ()
+    if "(" in s and s.endswith(")"):
+        inside = s.split("(")[-1].replace(")", "").strip()
+        inside = _norm_code(inside)
+        if 2 <= len(inside) <= 8:
+            return inside
+
+    # If the whole thing looks like a code
+    compact = _norm_code(s)
+    if 2 <= len(compact) <= 8 and any(ch.isalpha() for ch in compact):
+        return compact
+
+    # Otherwise take last token if it looks like a code
+    parts = [p for p in s.replace(",", " ").replace("/", " ").split() if p]
+    if parts:
+        last = _norm_code(parts[-1])
+        if 2 <= len(last) <= 8 and any(ch.isalpha() for ch in last):
+            return last
+
+    return ""
+
+
+def resolve_destination(rec: Dict[str, Any]) -> Tuple[str, Optional[float], Optional[float]]:
+    # Prefer explicit destination_code if your snapshot has it
+    raw_code = rec.get("destination_code")
+    if not raw_code:
+        # Try other common fields or the ROCS "Destination" text
+        raw_code = rec.get("destination") or rec.get("Destination") or rec.get("destination_text") or rec.get("DestinationText")
+
+    code = _extract_code_from_text(raw_code)
+    code_n = _norm_code(code)
+
+    city = ""
+    country = ""
+    lat = None
+    lon = None
+
+    if code_n and code_n in LOCATION_BY_CODE:
+        row = LOCATION_BY_CODE[code_n]
+        city = str(row.get("city") or "").strip()
+        country = str(row.get("country") or "").strip()
+        lat = row.get("lat")
+        lon = row.get("lon")
+
+    if code_n and (not city or not country) and code_n in DESTLAND_BY_CODE:
+        row = DESTLAND_BY_CODE[code_n]
+        if not city:
+            city = str(row.get("city") or "").strip()
+        if not country:
+            country = str(row.get("country") or "").strip()
+
+    # Build display text
+    if city and country and code_n:
+        text = f"{city}, {country} ({code_n})"
+    elif city and country:
+        text = f"{city}, {country}"
+    elif code_n:
+        text = code_n
+    else:
+        # absolute fallback: keep whatever came from snapshot
+        text = str(rec.get("destination_text") or rec.get("destination") or rec.get("Destination") or "-")
+
+    return text, lat, lon
+
+
+# -----------------------------
+# API
+# -----------------------------
 @app.get("/health")
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
         "push_enabled": PUSH_ENABLED,
         "snapshot_loaded": bool(SNAPSHOT),
+        "lookup_locations_loaded": len(LOCATION_BY_CODE),
+        "lookup_destland_loaded": len(DESTLAND_BY_CODE),
+        "openpyxl_ok": _OPENPYXL_OK,
     }
 
 
@@ -298,7 +540,8 @@ def get_status(
     lon: float = Query(...),
     ts: int = Query(..., description="Unix epoch seconds from the device"),
 ) -> Dict[str, Any]:
-    gf = geofence_check(lat, lon, ts)
+    # Enforce geofence, but we do NOT return geofence data anymore
+    geofence_check(lat, lon, ts)
 
     rec = _get_plate_record(plate)
     if rec is None:
@@ -306,22 +549,23 @@ def get_status(
             "plate": normalize_plate(plate),
             "found": False,
             "last_refresh": (SNAPSHOT or {}).get("last_update"),
-            "geofence": gf,
         }
 
     st = compute_driver_status(rec)
+
+    dest_text, dlat, dlon = resolve_destination(rec)
+    nav = destination_nav_url(dlat, dlon)
 
     return {
         "plate": normalize_plate(plate),
         "found": True,
         "status_key": st["status_key"],
         "status_text": st["status_text"],
-        "destination_text": rec.get("destination_text") or (rec.get("destination_code") or ""),
-        "destination_nav_url": destination_nav_url(rec),
+        "destination_text": dest_text,
+        "destination_nav_url": nav,
         "scheduled_departure": rec.get("scheduled_departure") or "",
         "report_in_office_at": st["report_in_office_at"],
         "last_refresh": (SNAPSHOT or {}).get("last_update"),
-        "geofence": gf,
         "push_enabled": PUSH_ENABLED,
         "vapid_public_key": VAPID_PUBLIC_KEY if PUSH_ENABLED else "",
     }
@@ -364,6 +608,9 @@ def index() -> HTMLResponse:
     return HTMLResponse(INDEX_HTML)
 
 
+# -----------------------------
+# Website (no geofence shown + background image + destination is server-calculated)
+# -----------------------------
 INDEX_HTML = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -371,33 +618,55 @@ INDEX_HTML = r"""<!doctype html>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Driver Status</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 16px; max-width: 720px; }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      background: url('/static/bg.png') no-repeat center center fixed;
+      background-size: cover;
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 18px 16px 24px;
+    }
+    .topcard {
+      background: rgba(255,255,255,0.45);
+      border-radius: 16px;
+      padding: 14px;
+      border: 1px solid rgba(0,0,0,0.08);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.10);
+    }
     input, button { font-size: 16px; padding: 10px; }
     button { cursor: pointer; }
     .row { display: flex; gap: 8px; }
     .row > * { flex: 1; }
-    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin-top: 12px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin-top: 12px; background: rgba(255,255,255,0.45); }
     .muted { color: #666; }
     .status-big { font-size: 22px; font-weight: 700; line-height: 1.25; }
-    .ok { background: #e9f6ea; border-color: #bfe6c3; }
-    .warn { background: #fff5e6; border-color: #ffd18a; }
-    .err { background: #fde8e8; border-color: #f5b5b5; }
+    .ok { border-color: #bfe6c3; }
+    .warn { border-color: #ffd18a; }
+    .err { border-color: #f5b5b5; }
     a { color: inherit; }
   </style>
 </head>
 <body>
-  <h2>Movement status by license plate</h2>
+  <div class="wrap">
+    <div class="topcard">
+      <h2 style="margin: 6px 0 12px;">Movement status by license plate</h2>
 
-  <div class="row">
-    <input id="plate" placeholder="Enter license plate (e.g. AB-123-CD)" />
-    <button id="btn">Check</button>
+      <div class="row">
+        <input id="plate" placeholder="Enter license plate (e.g. AB-123-CD)" />
+        <button id="btn">Check</button>
+      </div>
+
+      <div class="row" style="margin-top: 8px;">
+        <button id="btnNotify" style="display:none;">Enable notifications</button>
+      </div>
+
+      <div id="out" class="card" style="display:none;"></div>
+    </div>
   </div>
-
-  <div class="row" style="margin-top: 8px;">
-    <button id="btnNotify" style="display:none;">Enable notifications</button>
-  </div>
-
-  <div id="out" class="card" style="display:none;"></div>
 
   <script>
     const API_BASE = window.location.origin;
@@ -461,12 +730,10 @@ INDEX_HTML = r"""<!doctype html>
         }
 
         const last = data.last_refresh || "-";
-        const gf = data.geofence ? `${data.geofence.hub_name} (${data.geofence.distance_km.toFixed(1)} km)` : "-";
 
         if (!data.found) {
           show(`
             <div class="status-big">No movement found</div>
-            <div class="muted">Geofence: ${gf}</div>
             <div class="muted">Last refresh: ${last}</div>
           `, "warn");
           document.getElementById("btnNotify").style.display = "none";
@@ -482,8 +749,7 @@ INDEX_HTML = r"""<!doctype html>
           <div><b>Destination:</b> ${destLink}</div>
           <div><b>Scheduled departure date/time:</b> ${data.scheduled_departure || "-"}</div>
           <div><b>Report in the office:</b> ${data.report_in_office_at || "-"}</div>
-          <div class="muted" style="margin-top:8px;">Geofence: ${gf}</div>
-          <div class="muted">Last refresh: ${last}</div>
+          <div class="muted" style="margin-top:8px;">Last refresh: ${last}</div>
         `, "ok");
 
         if (data.push_enabled && data.vapid_public_key) {
@@ -553,6 +819,7 @@ INDEX_HTML = r"""<!doctype html>
   </script>
 </body>
 </html>"""
+
 
 SERVICE_WORKER_JS = r"""
 self.addEventListener('push', function(event) {
