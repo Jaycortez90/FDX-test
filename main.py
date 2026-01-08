@@ -1,5 +1,4 @@
 import json
-import re
 import asyncio
 import os
 import time
@@ -77,7 +76,6 @@ ADMIN_UPLOAD_SECRET = os.environ.get("ADMIN_UPLOAD_SECRET", "").strip()
 # =============================
 ORS_API_KEY = os.environ.get("ORS_API_KEY", "").strip()
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv/geojson"
-OSRM_ROUTE_URL = "https://router.project-osrm.org/route/v1/driving"
 
 # =============================
 # Web Push (optional)
@@ -178,33 +176,6 @@ def _parse_dt(val: Any) -> Optional[datetime]:
     if not s or s.lower() in {"nan", "none", "nat"}:
         return None
 
-    # Common Excel / EU formats (avoid dateutil mis-reading like 2026.01.08 -> 2026-08-01)
-    m = re.match(r"^(\d{4})\.(\d{1,2})\.(\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$", s)
-    if m:
-        y = int(m.group(1))
-        mo = int(m.group(2))
-        d = int(m.group(3))
-        hh = int(m.group(4) or 0)
-        mm = int(m.group(5) or 0)
-        ss = int(m.group(6) or 0)
-        try:
-            return datetime(y, mo, d, hh, mm, ss)
-        except Exception:
-            return None
-
-    m = re.match(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$", s)
-    if m:
-        d = int(m.group(1))
-        mo = int(m.group(2))
-        y = int(m.group(3))
-        hh = int(m.group(4) or 0)
-        mm = int(m.group(5) or 0)
-        ss = int(m.group(6) or 0)
-        try:
-            return datetime(y, mo, d, hh, mm, ss)
-        except Exception:
-            return None
-
     try:
         if s.endswith("Z"):
             return datetime.fromisoformat(s[:-1])
@@ -221,37 +192,18 @@ def _parse_dt(val: Any) -> Optional[datetime]:
     return None
 
 
-
 def _has(v: Any) -> bool:
     s = str(v or "").strip()
     return bool(s) and s.lower() not in {"nan", "none", "nat"}
 
 
 def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
-    # "ACD" in your terminology is handled as "close_door" here (multiple possible keys supported).
-    close_door = (
-        m.get("close_door")
-        or m.get("acd")
-        or m.get("ACD")
-        or m.get("actual_close_door")
-        or m.get("actual_close_door_time")
-        or ""
-    )
-    location = m.get("location") or m.get("Location") or ""
+    close_door = m.get("close_door", "")
+    location = m.get("location", "")
     trailer = str(m.get("trailer", "") or "").strip()
+    sched_raw = m.get("scheduled_departure", "")
 
-    sched_raw = (
-        m.get("scheduled_departure")
-        or m.get("scheduled_departure_time")
-        or m.get("departure_time")
-        or m.get("DepartureTime")
-        or ""
-    )
     sched_dt = _parse_dt(sched_raw)
-
-    report_at_dt: Optional[datetime] = None
-    if sched_dt:
-        report_at_dt = sched_dt - timedelta(minutes=45)
 
     if _has(location):
         if trailer:
@@ -259,35 +211,25 @@ def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
         else:
             msg = f"Please connect the trailer on location: {location} and pick up the CMR documents in the office!"
         key = "LOCATION"
-
     elif _has(close_door):
         msg = "Your trailer is ready, please report in the office for further information!"
         key = "CLOSEDOOR_NO_LOCATION"
-
     else:
-        now = datetime.now()
+        minutes_left = None
+        if sched_dt:
+            minutes_left = (sched_dt - datetime.now()).total_seconds() / 60.0
 
-        # New rule:
-        # If we are already after the "Report in the office" time AND still no ACD(close door) and no Location,
-        # show a stronger message.
-        if report_at_dt and now >= report_at_dt:
-            msg = "Report in the office for information!"
-            key = "REPORT_OFFICE_INFO"
+        if minutes_left is not None and minutes_left > 45:
+            msg = "Your trailer being loaded, please wait!"
+            key = "LOADING_WAIT"
         else:
-            minutes_left = None
-            if sched_dt:
-                minutes_left = (sched_dt - now).total_seconds() / 60.0
-
-            if minutes_left is not None and minutes_left > 45:
-                msg = "Your trailer being loaded, please wait!"
-                key = "LOADING_WAIT"
-            else:
-                msg = "Please report in the office!"
-                key = "REPORT_OFFICE"
+            msg = "Please report in the office!"
+            key = "REPORT_OFFICE"
 
     report_at = ""
-    if report_at_dt:
-        report_at = report_at_dt.strftime("%Y-%m-%d %H:%M")
+    if sched_dt:
+        ra = sched_dt - timedelta(minutes=45)
+        report_at = ra.strftime("%Y-%m-%d %H:%M")
 
     return {
         "status_key": key,
@@ -364,58 +306,6 @@ def _fetch_ors_route_coords(
         return None
 
 
-def _fetch_osrm_route_coords(
-    origin_lat: float,
-    origin_lon: float,
-    dest_lat: float,
-    dest_lon: float,
-) -> Optional[List[Tuple[float, float]]]:
-    """
-    Return route coordinates as (lat, lon) pairs using the public OSRM demo server.
-    This does NOT require an API key.
-    Returns None on any failure.
-    """
-    try:
-        url = (
-            f"{OSRM_ROUTE_URL}/"
-            f"{origin_lon:.6f},{origin_lat:.6f};{dest_lon:.6f},{dest_lat:.6f}"
-            "?overview=full&geometries=geojson"
-        )
-
-        req = urllib.request.Request(
-            url,
-            headers={"Accept": "application/json"},
-            method="GET",
-        )
-
-        with urllib.request.urlopen(req, timeout=7) as resp:
-            raw = resp.read()
-
-        data = json.loads(raw.decode("utf-8", errors="ignore") or "{}")
-        routes = data.get("routes") or []
-        if not routes:
-            return None
-
-        geom = (routes[0] or {}).get("geometry") or {}
-        coords = geom.get("coordinates") or []
-        if not coords:
-            return None
-
-        # coords are [lon, lat]
-        pts = [(float(lat), float(lon)) for lon, lat in coords]
-
-        # Downsample if extremely dense (keep max ~1200 points)
-        if len(pts) > 1200:
-            step = int(math.ceil(len(pts) / 1200.0))
-            pts = pts[::step]
-            if pts and pts[-1] != (float(dest_lat), float(dest_lon)):
-                pts.append((float(dest_lat), float(dest_lon)))
-
-        return pts
-    except Exception:
-        return None
-
-
 def build_route_points(
     origin_lat: float,
     origin_lon: float,
@@ -427,14 +317,11 @@ def build_route_points(
     if pts:
         return [[lat, lon] for (lat, lon) in pts], "Route source: OpenRouteService"
 
-    pts = _fetch_osrm_route_coords(origin_lat, origin_lon, dest_lat, dest_lon)
-    if pts:
-        return [[lat, lon] for (lat, lon) in pts], "Route source: OSRM"
-
     return [
         [float(origin_lat), float(origin_lon)],
         [float(dest_lat), float(dest_lon)],
     ], "Route source: direct line"
+
 
 
 def _get_plate_record(plate: str) -> Optional[Dict[str, Any]]:
@@ -631,87 +518,51 @@ def _extract_code_from_text(v: Any) -> str:
 
 
 def resolve_destination(rec: Dict[str, Any]) -> Tuple[str, Optional[float], Optional[float]]:
-    """
-    Returns: (destination_text, lat, lon)
-
-    destination_text output preference:
-      "City, Country (CODE)" when possible.
-
-    City/Country preference:
-    - Prefer dest-land.xlsx (clean city/country)
-    - Fallback to FedEx_locations.xlsx
-    """
-
-    def _first_nonempty(keys: List[str]) -> Any:
-        for k in keys:
-            if k in rec and _has(rec.get(k)):
-                return rec.get(k)
-        return None
-
-    # 1) Destination code from snapshot (many possible field names)
-    raw_code = _first_nonempty([
-        "dest_code", "DestCode", "DEST_CODE",
-        "destination_code", "DestinationCode", "DESTINATION_CODE",
-        "dest", "Dest", "DEST",
-        "dp_dest", "DP_Dest", "DP_DEST",
-        "destination", "Destination",
-        "destination_text", "DestinationText", "Destination_text",
-        "dest_text", "DestText", "DEST_TEXT",
-    ])
+    # Prefer explicit destination_code if your snapshot has it
+    raw_code = rec.get("destination_code")
+    if not raw_code:
+        # Try other common fields or the ROCS "Destination" text
+        raw_code = rec.get("destination") or rec.get("Destination") or rec.get("destination_text") or rec.get("DestinationText")
 
     code = _extract_code_from_text(raw_code)
     code_n = _norm_code(code)
 
-    # 2) Coordinates: prefer snapshot coords if present, otherwise lookup
-    lat = _safe_float(_first_nonempty([
-        "dest_lat", "DestLat", "destination_lat", "DestinationLat",
-        "lat_dest", "LatDest", "Dest_Lat", "DEST_LAT",
-    ]))
-    lon = _safe_float(_first_nonempty([
-        "dest_lon", "DestLon", "destination_lon", "DestinationLon",
-        "lon_dest", "LonDest", "Dest_Lon", "DEST_LON",
-    ]))
-
     city = ""
     country = ""
+    lat = None
+    lon = None
 
-    loc_row = LOCATION_BY_CODE.get(code_n) if code_n else None
-    dl_row = DESTLAND_BY_CODE.get(code_n) if code_n else None
+    if code_n and code_n in LOCATION_BY_CODE:
+        row = LOCATION_BY_CODE[code_n]
+        city = str(row.get("city") or "").strip()
+        country = str(row.get("country") or "").strip()
+        lat = row.get("lat")
+        lon = row.get("lon")
 
-    # Coordinates: best source is FedEx_locations.xlsx
-    if loc_row:
-        if lat is None:
-            lat = loc_row.get("lat")
-        if lon is None:
-            lon = loc_row.get("lon")
-
-    # City/Country: prefer dest-land.xlsx
-    if dl_row:
-        city = str(dl_row.get("city") or "").strip()
-        country = str(dl_row.get("country") or "").strip()
-
-    # Fallback city/country from FedEx_locations.xlsx
-    if loc_row:
+    if code_n and (not city or not country) and code_n in DESTLAND_BY_CODE:
+        row = DESTLAND_BY_CODE[code_n]
         if not city:
-            city = str(loc_row.get("city") or "").strip()
-            # common pattern: "ARH Depot Elst" -> remove leading "ARH "
-            if code_n and city.upper().startswith(code_n + " "):
-                city = city[len(code_n) + 1:].strip()
+            city = str(row.get("city") or "").strip()
         if not country:
-            country = str(loc_row.get("country") or "").strip()
+            country = str(row.get("country") or "").strip()
 
-    # 3) Build display text
+    # Build display text
     if city and country and code_n:
-        dest_text = f"{city}, {country} ({code_n})"
+        text = f"{city}, {country} ({code_n})"
     elif city and country:
-        dest_text = f"{city}, {country}"
+        text = f"{city}, {country}"
     elif code_n:
-        dest_text = code_n
+        text = code_n
     else:
         # absolute fallback: keep whatever came from snapshot
-        dest_text = str(_first_nonempty(["destination_text", "dest_text", "destination", "Destination"]) or "-")
+        text = str(rec.get("destination_text") or rec.get("destination") or rec.get("Destination") or "-")
 
-    return dest_text, lat, lon
+    return text, lat, lon
+
+
+# -----------------------------
+# API
+# -----------------------------
 @app.get("/health")
 def health() -> Dict[str, Any]:
     return {
@@ -888,25 +739,12 @@ INDEX_HTML = r"""<!doctype html>
   <title>Driver Status</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    html, body { height: 100%; }
-
     body {
       font-family: Arial, sans-serif;
       margin: 0;
       min-height: 100vh;
-      background: none;
-      position: relative;
-    }
-
-    /* Fixed full-viewport background (stable on mobile scroll) */
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      background: url('/static/bg.png') no-repeat center center;
+      background: url('/static/bg.png') no-repeat center center fixed;
       background-size: cover;
-      z-index: -1;
-      transform: translateZ(0);
     }
     .wrap {
       max-width: 720px;
@@ -1166,7 +1004,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="status-big">"${data.status_text}"</div>
           <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
           <div><b>Destination:</b> ${destLink}</div>
-          <div><b>Departure time:</b> ${data.scheduled_departure || "-"}</div>
+          <div><b>Scheduled departure date/time:</b> ${data.scheduled_departure || "-"}</div>
           <div><b>Report in the office:</b> ${data.report_in_office_at || "-"}</div>
           <div class="muted" style="margin-top:8px;">Last refresh: ${last}</div>
 
@@ -1215,7 +1053,23 @@ INDEX_HTML = r"""<!doctype html>
         }
 
         const reg = await navigator.serviceWorker.register('/sw.js');
-        const sub = await reg.pushManager.subscribe({
+
+        // Wait until the service worker is activated (otherwise PushManager.subscribe can fail with "no active Service Worker")
+        const sw = reg.installing || reg.waiting || reg.active;
+        if (!sw) throw new Error("Service Worker registration failed.");
+        await new Promise((resolve, reject) => {
+          if (sw.state === 'activated') return resolve();
+          const t = setTimeout(() => reject(new Error("Service Worker activation timeout.")), 8000);
+          sw.addEventListener('statechange', () => {
+            if (sw.state === 'activated') {
+              clearTimeout(t);
+              resolve();
+            }
+          });
+        });
+
+        const existing = await reg.pushManager.getSubscription();
+        const sub = existing || await reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
         });
@@ -1248,6 +1102,16 @@ INDEX_HTML = r"""<!doctype html>
 
 
 SERVICE_WORKER_JS = r"""
+self.addEventListener('install', function(event) {
+  // Activate immediately on first load
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', function(event) {
+  // Take control without requiring a reload
+  event.waitUntil(clients.claim());
+});
+
 self.addEventListener('push', function(event) {
   let data = {};
   try { data = event.data.json(); } catch (e) { data = { title: 'Update', body: event.data && event.data.text() }; }
