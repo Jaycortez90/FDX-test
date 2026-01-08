@@ -1,8 +1,11 @@
 import json
+import re
 import asyncio
 import os
 import time
 import math
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -68,6 +71,13 @@ MAX_LOCATION_AGE_SECONDS = 120
 # Upload secret (required for desktop uploads)
 # =============================
 ADMIN_UPLOAD_SECRET = os.environ.get("ADMIN_UPLOAD_SECRET", "").strip()
+
+# =============================
+# Routing (optional) - OpenRouteService (truck route geometry)
+# =============================
+ORS_API_KEY = os.environ.get("ORS_API_KEY", "").strip()
+ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv/geojson"
+OSRM_ROUTE_URL = "https://router.project-osrm.org/route/v1/driving"
 
 # =============================
 # Web Push (optional)
@@ -168,6 +178,33 @@ def _parse_dt(val: Any) -> Optional[datetime]:
     if not s or s.lower() in {"nan", "none", "nat"}:
         return None
 
+    # Common Excel / EU formats (avoid dateutil mis-reading like 2026.01.08 -> 2026-08-01)
+    m = re.match(r"^(\d{4})\.(\d{1,2})\.(\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$", s)
+    if m:
+        y = int(m.group(1))
+        mo = int(m.group(2))
+        d = int(m.group(3))
+        hh = int(m.group(4) or 0)
+        mm = int(m.group(5) or 0)
+        ss = int(m.group(6) or 0)
+        try:
+            return datetime(y, mo, d, hh, mm, ss)
+        except Exception:
+            return None
+
+    m = re.match(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$", s)
+    if m:
+        d = int(m.group(1))
+        mo = int(m.group(2))
+        y = int(m.group(3))
+        hh = int(m.group(4) or 0)
+        mm = int(m.group(5) or 0)
+        ss = int(m.group(6) or 0)
+        try:
+            return datetime(y, mo, d, hh, mm, ss)
+        except Exception:
+            return None
+
     try:
         if s.endswith("Z"):
             return datetime.fromisoformat(s[:-1])
@@ -184,18 +221,37 @@ def _parse_dt(val: Any) -> Optional[datetime]:
     return None
 
 
+
 def _has(v: Any) -> bool:
     s = str(v or "").strip()
     return bool(s) and s.lower() not in {"nan", "none", "nat"}
 
 
 def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
-    close_door = m.get("close_door", "")
-    location = m.get("location", "")
+    # "ACD" in your terminology is handled as "close_door" here (multiple possible keys supported).
+    close_door = (
+        m.get("close_door")
+        or m.get("acd")
+        or m.get("ACD")
+        or m.get("actual_close_door")
+        or m.get("actual_close_door_time")
+        or ""
+    )
+    location = m.get("location") or m.get("Location") or ""
     trailer = str(m.get("trailer", "") or "").strip()
-    sched_raw = m.get("scheduled_departure", "")
 
+    sched_raw = (
+        m.get("scheduled_departure")
+        or m.get("scheduled_departure_time")
+        or m.get("departure_time")
+        or m.get("DepartureTime")
+        or ""
+    )
     sched_dt = _parse_dt(sched_raw)
+
+    report_at_dt: Optional[datetime] = None
+    if sched_dt:
+        report_at_dt = sched_dt - timedelta(minutes=45)
 
     if _has(location):
         if trailer:
@@ -203,25 +259,35 @@ def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
         else:
             msg = f"Please connect the trailer on location: {location} and pick up the CMR documents in the office!"
         key = "LOCATION"
+
     elif _has(close_door):
         msg = "Your trailer is ready, please report in the office for further information!"
         key = "CLOSEDOOR_NO_LOCATION"
-    else:
-        minutes_left = None
-        if sched_dt:
-            minutes_left = (sched_dt - datetime.now()).total_seconds() / 60.0
 
-        if minutes_left is not None and minutes_left > 45:
-            msg = "Your trailer being loaded, please wait!"
-            key = "LOADING_WAIT"
+    else:
+        now = datetime.now()
+
+        # New rule:
+        # If we are already after the "Report in the office" time AND still no ACD(close door) and no Location,
+        # show a stronger message.
+        if report_at_dt and now >= report_at_dt:
+            msg = "Report in the office for information!"
+            key = "REPORT_OFFICE_INFO"
         else:
-            msg = "Please report in the office!"
-            key = "REPORT_OFFICE"
+            minutes_left = None
+            if sched_dt:
+                minutes_left = (sched_dt - now).total_seconds() / 60.0
+
+            if minutes_left is not None and minutes_left > 45:
+                msg = "Your trailer being loaded, please wait!"
+                key = "LOADING_WAIT"
+            else:
+                msg = "Please report in the office!"
+                key = "REPORT_OFFICE"
 
     report_at = ""
-    if sched_dt:
-        ra = sched_dt - timedelta(minutes=45)
-        report_at = ra.strftime("%Y-%m-%d %H:%M")
+    if report_at_dt:
+        report_at = report_at_dt.strftime("%Y-%m-%d %H:%M")
 
     return {
         "status_key": key,
@@ -239,6 +305,136 @@ def destination_nav_url(lat: Optional[float], lon: Optional[float]) -> Optional[
         return f"https://www.google.com/maps/dir/?api=1&destination={latf},{lonf}&travelmode=driving"
     except Exception:
         return None
+
+
+def _fetch_ors_route_coords(
+    origin_lat: float,
+    origin_lon: float,
+    dest_lat: float,
+    dest_lon: float,
+) -> Optional[List[Tuple[float, float]]]:
+    """
+    Return route coordinates as (lat, lon) pairs using OpenRouteService.
+    Returns None if ORS is not configured or on any failure.
+    """
+    key = (ORS_API_KEY or "").strip()
+    if not key:
+        return None
+
+    try:
+        qs = urllib.parse.urlencode({
+            "start": f"{origin_lon:.6f},{origin_lat:.6f}",
+            "end": f"{dest_lon:.6f},{dest_lat:.6f}",
+        })
+        url = f"{ORS_DIRECTIONS_URL}?{qs}"
+
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": key,
+                "Accept": "application/json",
+            },
+            method="GET",
+        )
+
+        with urllib.request.urlopen(req, timeout=7) as resp:
+            raw = resp.read()
+
+        data = json.loads(raw.decode("utf-8", errors="ignore") or "{}")
+        feats = data.get("features") or []
+        if not feats:
+            return None
+
+        coords = (feats[0].get("geometry") or {}).get("coordinates") or []
+        if not coords:
+            return None
+
+        # coords are [lon, lat]
+        pts = [(float(lat), float(lon)) for lon, lat in coords]
+
+        # Downsample if extremely dense (keep max ~1200 points)
+        if len(pts) > 1200:
+            step = int(math.ceil(len(pts) / 1200.0))
+            pts = pts[::step]
+            if pts and pts[-1] != (float(dest_lat), float(dest_lon)):
+                pts.append((float(dest_lat), float(dest_lon)))
+
+        return pts
+    except Exception:
+        return None
+
+
+def _fetch_osrm_route_coords(
+    origin_lat: float,
+    origin_lon: float,
+    dest_lat: float,
+    dest_lon: float,
+) -> Optional[List[Tuple[float, float]]]:
+    """
+    Return route coordinates as (lat, lon) pairs using the public OSRM demo server.
+    This does NOT require an API key.
+    Returns None on any failure.
+    """
+    try:
+        url = (
+            f"{OSRM_ROUTE_URL}/"
+            f"{origin_lon:.6f},{origin_lat:.6f};{dest_lon:.6f},{dest_lat:.6f}"
+            "?overview=full&geometries=geojson"
+        )
+
+        req = urllib.request.Request(
+            url,
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+
+        with urllib.request.urlopen(req, timeout=7) as resp:
+            raw = resp.read()
+
+        data = json.loads(raw.decode("utf-8", errors="ignore") or "{}")
+        routes = data.get("routes") or []
+        if not routes:
+            return None
+
+        geom = (routes[0] or {}).get("geometry") or {}
+        coords = geom.get("coordinates") or []
+        if not coords:
+            return None
+
+        # coords are [lon, lat]
+        pts = [(float(lat), float(lon)) for lon, lat in coords]
+
+        # Downsample if extremely dense (keep max ~1200 points)
+        if len(pts) > 1200:
+            step = int(math.ceil(len(pts) / 1200.0))
+            pts = pts[::step]
+            if pts and pts[-1] != (float(dest_lat), float(dest_lon)):
+                pts.append((float(dest_lat), float(dest_lon)))
+
+        return pts
+    except Exception:
+        return None
+
+
+def build_route_points(
+    origin_lat: float,
+    origin_lon: float,
+    dest_lat: float,
+    dest_lon: float,
+) -> Tuple[List[List[float]], str]:
+    """Return polyline as [[lat, lon], ...] and a short note."""
+    pts = _fetch_ors_route_coords(origin_lat, origin_lon, dest_lat, dest_lon)
+    if pts:
+        return [[lat, lon] for (lat, lon) in pts], "Route source: OpenRouteService"
+
+    pts = _fetch_osrm_route_coords(origin_lat, origin_lon, dest_lat, dest_lon)
+    if pts:
+        return [[lat, lon] for (lat, lon) in pts], "Route source: OSRM"
+
+    return [
+        [float(origin_lat), float(origin_lon)],
+        [float(dest_lat), float(dest_lon)],
+    ], "Route source: direct line"
 
 
 def _get_plate_record(plate: str) -> Optional[Dict[str, Any]]:
@@ -435,11 +631,36 @@ def _extract_code_from_text(v: Any) -> str:
 
 
 def resolve_destination(rec: Dict[str, Any]) -> Tuple[str, Optional[float], Optional[float]]:
-    # Prefer explicit destination_code if your snapshot has it
-    raw_code = rec.get("destination_code")
-    if not raw_code:
-        # Try other common fields or the ROCS "Destination" text
-        raw_code = rec.get("destination") or rec.get("Destination") or rec.get("destination_text") or rec.get("DestinationText")
+    """
+    Resolve destination display text + coordinates.
+
+    Goal output:
+      "City, Country (CODE)"
+
+    Notes:
+    - If Excel lookups are not available on the server, we still keep any rich destination text
+      coming from the uploaded snapshot (e.g. "Rotterdam, Netherlands (RTM)").
+    """
+    raw_display = (
+        rec.get("destination_text")
+        or rec.get("DestinationText")
+        or rec.get("Destination_text")
+        or rec.get("destination")
+        or rec.get("Destination")
+        or rec.get("dest")
+        or rec.get("Dest")
+        or rec.get("dp_dest")
+        or rec.get("DP_Dest")
+        or ""
+    )
+
+    raw_code = (
+        rec.get("destination_code")
+        or rec.get("dest_code")
+        or rec.get("DestCode")
+        or raw_display
+        or ""
+    )
 
     code = _extract_code_from_text(raw_code)
     code_n = _norm_code(code)
@@ -466,13 +687,15 @@ def resolve_destination(rec: Dict[str, Any]) -> Tuple[str, Optional[float], Opti
     # Build display text
     if city and country and code_n:
         text = f"{city}, {country} ({code_n})"
-    elif city and country:
-        text = f"{city}, {country}"
-    elif code_n:
-        text = code_n
     else:
-        # absolute fallback: keep whatever came from snapshot
-        text = str(rec.get("destination_text") or rec.get("destination") or rec.get("Destination") or "-")
+        disp = str(raw_display or "").strip()
+        # If snapshot already contains "City, Country (CODE)" keep it as-is.
+        if disp and (disp.upper() != code_n) and (("," in disp) or ("(" in disp) or (" " in disp)):
+            text = disp
+        elif code_n:
+            text = code_n
+        else:
+            text = disp or "-"
 
     return text, lat, lon
 
@@ -571,6 +794,43 @@ def get_status(
     }
 
 
+@app.get("/api/route")
+def get_route(
+    plate: str = Query(..., min_length=2),
+    lat: float = Query(...),
+    lon: float = Query(...),
+    ts: int = Query(..., description="Unix epoch seconds from the device"),
+) -> Dict[str, Any]:
+    """Return a zoomable route map polyline for the website."""
+    geofence_check(lat, lon, ts)
+
+    rec = _get_plate_record(plate)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="No movement found for this plate.")
+
+    dest_text, dlat, dlon = resolve_destination(rec)
+    if dlat is None or dlon is None:
+        raise HTTPException(status_code=404, detail="Destination coordinates not available for this movement.")
+
+    origin_lat = float(HUB_LAT)
+    origin_lon = float(HUB_LON)
+    dest_lat = float(dlat)
+    dest_lon = float(dlon)
+
+    route_pts, note = build_route_points(origin_lat, origin_lon, dest_lat, dest_lon)
+
+    return {
+        "plate": normalize_plate(plate),
+        "origin": {"lat": origin_lat, "lon": origin_lon},
+        "dest": {"lat": dest_lat, "lon": dest_lon},
+        "route": route_pts,
+        "note": note,
+        "destination_text": dest_text,
+        "last_refresh": (SNAPSHOT or {}).get("last_update"),
+    }
+
+
+
 @app.post("/api/subscribe")
 def subscribe(
     plate: str = Query(..., min_length=2),
@@ -617,13 +877,27 @@ INDEX_HTML = r"""<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Driver Status</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
+    html, body { height: 100%; }
+
     body {
       font-family: Arial, sans-serif;
       margin: 0;
       min-height: 100vh;
-      background: url('/static/bg.png') no-repeat center center fixed;
+      background: none;
+      position: relative;
+    }
+
+    /* Fixed full-viewport background (stable on mobile scroll) */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background: url('/static/bg.png') no-repeat center center;
       background-size: cover;
+      z-index: -1;
+      transform: translateZ(0);
     }
     .wrap {
       max-width: 720px;
@@ -698,6 +972,16 @@ INDEX_HTML = r"""<!doctype html>
     .ok { border-color: #bfe6c3; }
     .warn { border-color: #ffd18a; }
     .err { border-color: #f5b5b5; }
+
+    #map {
+      height: 320px;
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid rgba(0,0,0,0.18);
+      overflow: hidden;
+      background: rgba(255,255,255,0.35);
+    }
+
     a { color: inherit; }
   </style>
 </head>
@@ -719,11 +1003,81 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
   <script>
     const API_BASE = window.location.origin;
 
     function normalizePlate(v) {
       return (v || "").toUpperCase().trim().replaceAll(" ", "").replaceAll("-", "");
+    }
+
+    let _map = null;
+    let _routeLine = null;
+
+    function destroyMap() {
+      try {
+        if (_map) _map.remove();
+      } catch (e) {}
+      _map = null;
+      _routeLine = null;
+    }
+
+    function setMapNote(msg, isErr) {
+      const el = document.getElementById("mapNote");
+      if (!el) return;
+      el.textContent = msg || "";
+      el.style.color = isErr ? "#a00000" : "";
+    }
+
+    async function renderRouteMap(plate, loc) {
+      const mapDiv = document.getElementById("map");
+      if (!mapDiv || typeof L === "undefined") return;
+
+      destroyMap();
+
+      _map = L.map("map", { zoomControl: true, scrollWheelZoom: true });
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors",
+      }).addTo(_map);
+
+      setMapNote("Loading route…", false);
+
+      try {
+        const url = `${API_BASE}/api/route?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!res.ok) {
+          setMapNote(data.detail || res.statusText, true);
+          _map.setView([loc.lat, loc.lon], 10);
+          setTimeout(() => { if (_map) _map.invalidateSize(); }, 80);
+          return;
+        }
+
+        const pts = data.route || [];
+        if (pts.length >= 2) {
+          _routeLine = L.polyline(pts, { color: "#4D148C", weight: 4, opacity: 0.9 }).addTo(_map);
+          _map.fitBounds(_routeLine.getBounds(), { padding: [12, 12] });
+        } else {
+          _map.setView([loc.lat, loc.lon], 10);
+        }
+
+        if (data.origin && data.origin.lat != null && data.origin.lon != null) {
+          L.marker([data.origin.lat, data.origin.lon]).addTo(_map).bindPopup("Origin");
+        }
+        if (data.dest && data.dest.lat != null && data.dest.lon != null) {
+          L.marker([data.dest.lat, data.dest.lon]).addTo(_map).bindPopup("Destination");
+        }
+
+        setMapNote(data.note || "", false);
+        setTimeout(() => { if (_map) _map.invalidateSize(); }, 80);
+      } catch (e) {
+        setMapNote("Route error: " + e, true);
+        try { _map.setView([loc.lat, loc.lon], 10); } catch (e2) {}
+        setTimeout(() => { if (_map) _map.invalidateSize(); }, 80);
+      }
     }
 
     function show(html, klass) {
@@ -757,12 +1111,15 @@ INDEX_HTML = r"""<!doctype html>
       const plate = normalizePlate(document.getElementById("plate").value);
       if (!plate) return;
 
+      destroyMap();
+
       show(`<div class="muted">Getting location…</div>`);
 
       let loc;
       try {
         loc = await getLocation();
       } catch (e) {
+        destroyMap();
         show(`<b>Location error:</b> ${e.message}<div class="muted">Enable GPS and allow location permission.</div>`, "err");
         return;
       }
@@ -775,6 +1132,7 @@ INDEX_HTML = r"""<!doctype html>
         const data = await res.json();
 
         if (!res.ok) {
+          destroyMap();
           show(`<b>Error:</b> ${data.detail || res.statusText}`, "err");
           document.getElementById("btnNotify").style.display = "none";
           return;
@@ -783,6 +1141,7 @@ INDEX_HTML = r"""<!doctype html>
         const last = data.last_refresh || "-";
 
         if (!data.found) {
+          destroyMap();
           show(`
             <div class="status-big">No movement found</div>
             <div class="muted">Last refresh: ${last}</div>
@@ -798,10 +1157,16 @@ INDEX_HTML = r"""<!doctype html>
           <div class="status-big">"${data.status_text}"</div>
           <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
           <div><b>Destination:</b> ${destLink}</div>
-          <div><b>Scheduled departure date/time:</b> ${data.scheduled_departure || "-"}</div>
+          <div><b>Departure time:</b> ${data.scheduled_departure || "-"}</div>
           <div><b>Report in the office:</b> ${data.report_in_office_at || "-"}</div>
           <div class="muted" style="margin-top:8px;">Last refresh: ${last}</div>
+
+          <div style="margin-top:12px;"><b>Route map:</b></div>
+          <div id="map"></div>
+          <div id="mapNote" class="muted" style="margin-top:6px;"></div>
         `, "ok");
+
+        setTimeout(() => renderRouteMap(plate, loc), 0);
 
         if (data.push_enabled && data.vapid_public_key) {
           const bn = document.getElementById("btnNotify");
@@ -812,6 +1177,7 @@ INDEX_HTML = r"""<!doctype html>
         }
 
       } catch (e) {
+        destroyMap();
         show(`<b>Network error:</b> ${e}`, "err");
         document.getElementById("btnNotify").style.display = "none";
       }
