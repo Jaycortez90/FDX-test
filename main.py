@@ -3,10 +3,9 @@ import asyncio
 import os
 import time
 import math
-import urllib.parse
-import urllib.request
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query, Request, Body
 from fastapi.responses import HTMLResponse, Response
@@ -44,64 +43,19 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-# Background image path used by the website:
-# Put your uploaded image into: static/bg.png
-# (same folder as this main.py, inside "static")
+# Background image used by the website:
+# Put your background image into: static/bg.png
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Excel lookup files (server-side destination calculation)
-# Optional env overrides:
-#   - LOCATIONS_XLSX: path to FedEx_locations.xlsx / .xlsm
-#   - DEST_LAND_XLSX: path to dest-land.xlsx / .xlsm
-LOCATIONS_XLSX_ENV = os.environ.get("LOCATIONS_XLSX", "").strip()
+# You can also override these with environment variables.
+LOCATIONS_XLSX_ENV = os.environ.get("FEDEX_LOCATIONS_XLSX", "").strip()
 DEST_LAND_XLSX_ENV = os.environ.get("DEST_LAND_XLSX", "").strip()
-
-
-def _pick_existing_path(candidates: List[str]) -> str:
-    first_non_empty = ""
-    for p in candidates:
-        p = (p or "").strip()
-        if p and not first_non_empty:
-            first_non_empty = p
-        if p and os.path.exists(p):
-            return p
-    return first_non_empty
-
-
-def _locations_path() -> str:
-    # Prefer env var, otherwise try common locations
-    candidates = [
-        LOCATIONS_XLSX_ENV,
-        os.path.join(DATA_DIR, "FedEx_locations.xlsx"),
-        os.path.join(DATA_DIR, "FedEx_locations.xlsm"),
-        os.path.join(BASE_DIR, "FedEx_locations.xlsx"),
-        os.path.join(os.getcwd(), "data", "FedEx_locations.xlsx"),
-        os.path.join(os.getcwd(), "FedEx_locations.xlsx"),
-    ]
-    return _pick_existing_path(candidates)
-
-
-def _dest_land_path() -> str:
-    candidates = [
-        DEST_LAND_XLSX_ENV,
-        os.path.join(DATA_DIR, "dest-land.xlsx"),
-        os.path.join(DATA_DIR, "dest-land.xlsm"),
-        os.path.join(DATA_DIR, "dest_land.xlsx"),
-        os.path.join(DATA_DIR, "dest_land.xlsm"),
-        os.path.join(BASE_DIR, "dest-land.xlsx"),
-        os.path.join(BASE_DIR, "dest-land.xlsm"),
-        os.path.join(os.getcwd(), "data", "dest-land.xlsx"),
-        os.path.join(os.getcwd(), "dest-land.xlsx"),
-    ]
-    return _pick_existing_path(candidates)
-
-
-LOCATIONS_XLSX = _locations_path()
-DEST_LAND_XLSX = _dest_land_path()
 
 # Loaded at startup
 LOCATION_BY_CODE: Dict[str, Dict[str, Any]] = {}
 DESTLAND_BY_CODE: Dict[str, Dict[str, Any]] = {}
+LOOKUP_PATHS: Dict[str, str] = {"locations": "", "dest_land": ""}
 
 # =============================
 # Geofence (QAR Duiven) - still enforced, but NOT displayed on website
@@ -114,14 +68,13 @@ MAX_LOCATION_AGE_SECONDS = 120
 
 # =============================
 # Upload secret (required for desktop uploads)
+# Backwards-compatible: ADMIN_UPLOAD_SECRET OR DRIVER_PORTAL_UPLOAD_SECRET
 # =============================
-ADMIN_UPLOAD_SECRET = os.environ.get("ADMIN_UPLOAD_SECRET", "").strip()
-
-# =============================
-# Routing (optional) - OpenRouteService (truck route geometry)
-# =============================
-ORS_API_KEY = os.environ.get("ORS_API_KEY", "").strip()
-ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv/geojson"
+ADMIN_UPLOAD_SECRET = (
+    os.environ.get("ADMIN_UPLOAD_SECRET", "").strip()
+    or os.environ.get("DRIVER_PORTAL_UPLOAD_SECRET", "").strip()
+    or os.environ.get("UPLOAD_SECRET", "").strip()
+)
 
 # =============================
 # Web Push (optional)
@@ -284,89 +237,23 @@ def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def destination_nav_url(lat: Optional[float], lon: Optional[float]) -> Optional[str]:
+def destination_nav_url(lat: Optional[float], lon: Optional[float], fallback_text: str = "") -> Optional[str]:
+    """Return a Google Maps navigation URL.
+    - Prefer coordinates (lat/lon) if available.
+    - Fallback to destination text search if coordinates are missing.
+    """
     try:
-        if lat is None or lon is None:
-            return None
-        latf = float(lat)
-        lonf = float(lon)
-        return f"https://www.google.com/maps/dir/?api=1&destination={latf},{lonf}&travelmode=driving"
+        if lat is not None and lon is not None:
+            latf = float(lat)
+            lonf = float(lon)
+            return f"https://www.google.com/maps/dir/?api=1&destination={latf},{lonf}&travelmode=driving"
+
+        fb = (fallback_text or "").strip()
+        if fb:
+            return f"https://www.google.com/maps/dir/?api=1&destination={quote(fb)}&travelmode=driving"
+        return None
     except Exception:
         return None
-
-
-def _fetch_ors_route_coords(
-    origin_lat: float,
-    origin_lon: float,
-    dest_lat: float,
-    dest_lon: float,
-) -> Optional[List[Tuple[float, float]]]:
-    """
-    Return route coordinates as (lat, lon) pairs using OpenRouteService.
-    Returns None if ORS is not configured or on any failure.
-    """
-    key = (ORS_API_KEY or "").strip()
-    if not key:
-        return None
-
-    try:
-        qs = urllib.parse.urlencode({
-            "start": f"{origin_lon:.6f},{origin_lat:.6f}",
-            "end": f"{dest_lon:.6f},{dest_lat:.6f}",
-        })
-        url = f"{ORS_DIRECTIONS_URL}?{qs}"
-
-        req = urllib.request.Request(
-            url,
-            headers={
-                "Authorization": key,
-                "Accept": "application/json",
-            },
-            method="GET",
-        )
-
-        with urllib.request.urlopen(req, timeout=7) as resp:
-            raw = resp.read()
-
-        data = json.loads(raw.decode("utf-8", errors="ignore") or "{}")
-        feats = data.get("features") or []
-        if not feats:
-            return None
-
-        coords = (feats[0].get("geometry") or {}).get("coordinates") or []
-        if not coords:
-            return None
-
-        # coords are [lon, lat]
-        pts = [(float(lat), float(lon)) for lon, lat in coords]
-
-        # Downsample if extremely dense (keep max ~1200 points)
-        if len(pts) > 1200:
-            step = int(math.ceil(len(pts) / 1200.0))
-            pts = pts[::step]
-            if pts and pts[-1] != (float(dest_lat), float(dest_lon)):
-                pts.append((float(dest_lat), float(dest_lon)))
-
-        return pts
-    except Exception:
-        return None
-
-
-def build_route_points(
-    origin_lat: float,
-    origin_lon: float,
-    dest_lat: float,
-    dest_lon: float,
-) -> Tuple[List[List[float]], str]:
-    """Return polyline as [[lat, lon], ...] and a short note."""
-    pts = _fetch_ors_route_coords(origin_lat, origin_lon, dest_lat, dest_lon)
-    if pts:
-        return [[lat, lon] for (lat, lon) in pts], "Route source: OpenRouteService"
-
-    return [
-        [float(origin_lat), float(origin_lon)],
-        [float(dest_lat), float(dest_lon)],
-    ], "Route source: direct line"
 
 
 
@@ -445,13 +332,40 @@ def _safe_float(v: Any) -> Optional[float]:
         return None
 
 
-def _load_xlsx_map_locations(path: str) -> Dict[str, Dict[str, Any]]:
-    out: Dict[str, Dict[str, Any]] = {}
-    if not _OPENPYXL_OK or not os.path.exists(path):
-        return out
+def _pick_existing_path(candidates: List[str]) -> str:
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return ""
 
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)  # type: ignore
-    ws = wb.active
+
+def _locations_path() -> str:
+    # Prefer env var, otherwise try common locations
+    candidates = [
+        LOCATIONS_XLSX_ENV,
+        os.path.join(DATA_DIR, "FedEx_locations.xlsx"),
+        os.path.join(DATA_DIR, "FedEx_locations.xlsm"),
+        os.path.join(BASE_DIR, "FedEx_locations.xlsx"),
+        os.path.join(os.getcwd(), "data", "FedEx_locations.xlsx"),
+        os.path.join(os.getcwd(), "FedEx_locations.xlsx"),
+    ]
+    return _pick_existing_path(candidates)
+
+
+def _dest_land_path() -> str:
+    candidates = [
+        DEST_LAND_XLSX_ENV,
+        os.path.join(DATA_DIR, "dest-land.xlsx"),
+        os.path.join(DATA_DIR, "dest_land.xlsx"),
+        os.path.join(BASE_DIR, "dest-land.xlsx"),
+        os.path.join(os.getcwd(), "data", "dest-land.xlsx"),
+        os.path.join(os.getcwd(), "dest-land.xlsx"),
+    ]
+    return _pick_existing_path(candidates)
+
+
+def _sheet_to_map_locations(ws) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
     rows = ws.iter_rows(values_only=True)
     header_row = next(rows, None)
     if not header_row:
@@ -459,8 +373,8 @@ def _load_xlsx_map_locations(path: str) -> Dict[str, Dict[str, Any]]:
 
     headers = [_clean_header(h) for h in header_row]
 
-    code_i = _find_col(headers, ["code", "locationcode", "loccode", "stationcode", "facilitycode", "destcode"])
-    city_i = _find_col(headers, ["city", "town", "name", "locationname"])
+    code_i = _find_col(headers, ["dest", "code", "locationcode", "loccode", "stationcode", "facilitycode", "destcode"])
+    city_i = _find_col(headers, ["city", "town", "name", "locationname", "location"])
     country_i = _find_col(headers, ["country", "land"])
     lat_i = _find_col(headers, ["lat", "latitude"])
     lon_i = _find_col(headers, ["lon", "lng", "long", "longitude"])
@@ -487,21 +401,16 @@ def _load_xlsx_map_locations(path: str) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def _load_xlsx_map_destland(path: str) -> Dict[str, Dict[str, Any]]:
+def _sheet_to_map_destland(ws) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
-    if not _OPENPYXL_OK or not os.path.exists(path):
-        return out
-
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)  # type: ignore
-    ws = wb.active
     rows = ws.iter_rows(values_only=True)
     header_row = next(rows, None)
     if not header_row:
         return out
 
     headers = [_clean_header(h) for h in header_row]
-    code_i = _find_col(headers, ["code", "locationcode", "loccode", "stationcode", "facilitycode", "destcode"])
-    city_i = _find_col(headers, ["city", "town", "name", "locationname"])
+    code_i = _find_col(headers, ["dest", "code", "locationcode", "loccode", "stationcode", "facilitycode", "destcode"])
+    city_i = _find_col(headers, ["city", "town", "name", "locationname", "location"])
     country_i = _find_col(headers, ["country", "land"])
 
     if code_i is None:
@@ -523,15 +432,39 @@ def _load_xlsx_map_destland(path: str) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def _load_xlsx_any_sheet(path: str, loader_fn) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    if not _OPENPYXL_OK or not path or not os.path.exists(path):
+        return out
+
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)  # type: ignore
+    # Try every sheet; pick the first that contains a valid "code" column.
+    for name in wb.sheetnames:
+        try:
+            ws = wb[name]
+            tmp = loader_fn(ws)
+            if tmp:
+                return tmp
+        except Exception:
+            continue
+
+    return out
+
+
 def _load_destination_lookups() -> None:
-    global LOCATION_BY_CODE, DESTLAND_BY_CODE
+    global LOCATION_BY_CODE, DESTLAND_BY_CODE, LOOKUP_PATHS
+
+    loc_path = _locations_path()
+    dl_path = _dest_land_path()
+    LOOKUP_PATHS = {"locations": loc_path, "dest_land": dl_path}
+
     try:
-        LOCATION_BY_CODE = _load_xlsx_map_locations(LOCATIONS_XLSX)
+        LOCATION_BY_CODE = _load_xlsx_any_sheet(loc_path, _sheet_to_map_locations)
     except Exception:
         LOCATION_BY_CODE = {}
 
     try:
-        DESTLAND_BY_CODE = _load_xlsx_map_destland(DEST_LAND_XLSX)
+        DESTLAND_BY_CODE = _load_xlsx_any_sheet(dl_path, _sheet_to_map_destland)
     except Exception:
         DESTLAND_BY_CODE = {}
 
@@ -545,65 +478,95 @@ def _extract_code_from_text(v: Any) -> str:
     if "(" in s and s.endswith(")"):
         inside = s.split("(")[-1].replace(")", "").strip()
         inside = _norm_code(inside)
-        if 2 <= len(inside) <= 8:
+        if 2 <= len(inside) <= 10:
             return inside
 
     # If the whole thing looks like a code
     compact = _norm_code(s)
-    if 2 <= len(compact) <= 8 and any(ch.isalpha() for ch in compact):
+    if 2 <= len(compact) <= 10 and any(ch.isalpha() for ch in compact):
         return compact
 
     # Otherwise take last token if it looks like a code
     parts = [p for p in s.replace(",", " ").replace("/", " ").split() if p]
     if parts:
         last = _norm_code(parts[-1])
-        if 2 <= len(last) <= 8 and any(ch.isalpha() for ch in last):
+        if 2 <= len(last) <= 10 and any(ch.isalpha() for ch in last):
             return last
 
     return ""
 
 
+def _first_nonempty(rec: Dict[str, Any], keys: List[str]) -> Any:
+    for k in keys:
+        if k in rec and _has(rec.get(k)):
+            return rec.get(k)
+    return None
+
+
 def resolve_destination(rec: Dict[str, Any]) -> Tuple[str, Optional[float], Optional[float]]:
-    # Prefer explicit destination_code if your snapshot has it
-    raw_code = rec.get("destination_code")
-    if not raw_code:
-        # Try other common fields or the ROCS "Destination" text
-        raw_code = rec.get("destination") or rec.get("Destination") or rec.get("destination_text") or rec.get("DestinationText")
+    """
+    Returns: (destination_text, lat, lon)
+    destination_text should be: "City, Country (CODE)" when possible.
+    """
+
+    # 1) Determine destination code from the snapshot (many possible field names)
+    raw_code = _first_nonempty(rec, [
+        "dest_code", "DestCode", "DEST_CODE",
+        "destination_code", "DestinationCode", "DESTINATION_CODE",
+        "dest", "Dest", "DEST",
+        "destination", "Destination",
+        "destination_text", "DestinationText",
+        "dest_text", "DestText", "DEST_TEXT",
+    ])
 
     code = _extract_code_from_text(raw_code)
     code_n = _norm_code(code)
 
+    # 2) Coordinates: prefer snapshot coordinates if provided, otherwise lookup
+    lat = _safe_float(_first_nonempty(rec, ["dest_lat", "DestLat", "destination_lat", "DestinationLat", "lat_dest", "LatDest"]))
+    lon = _safe_float(_first_nonempty(rec, ["dest_lon", "DestLon", "destination_lon", "DestinationLon", "lon_dest", "LonDest"]))
+
     city = ""
     country = ""
-    lat = None
-    lon = None
 
-    if code_n and code_n in LOCATION_BY_CODE:
-        row = LOCATION_BY_CODE[code_n]
-        city = str(row.get("city") or "").strip()
-        country = str(row.get("country") or "").strip()
-        lat = row.get("lat")
-        lon = row.get("lon")
+    # 3) Lookups
+    loc_row = LOCATION_BY_CODE.get(code_n) if code_n else None
+    dl_row = DESTLAND_BY_CODE.get(code_n) if code_n else None
 
-    if code_n and (not city or not country) and code_n in DESTLAND_BY_CODE:
-        row = DESTLAND_BY_CODE[code_n]
+    # Coordinates: best source is FedEx_locations.xlsx
+    if loc_row:
+        if lat is None:
+            lat = loc_row.get("lat")
+        if lon is None:
+            lon = loc_row.get("lon")
+
+    # City/Country: prefer dest-land.xlsx because it contains clean city names
+    if dl_row:
+        city = str(dl_row.get("city") or "").strip()
+        country = str(dl_row.get("country") or "").strip()
+
+    # Fallback for city/country (if dest-land missing)
+    if loc_row:
         if not city:
-            city = str(row.get("city") or "").strip()
+            city = str(loc_row.get("city") or "").strip()
+            # common pattern: "ARH Depot Elst" -> remove leading "ARH "
+            if code_n and city.upper().startswith(code_n + " "):
+                city = city[len(code_n) + 1:].strip()
         if not country:
-            country = str(row.get("country") or "").strip()
+            country = str(loc_row.get("country") or "").strip()
 
-    # Build display text
+    # 5) Build display text
     if city and country and code_n:
-        text = f"{city}, {country} ({code_n})"
+        dest_text = f"{city}, {country} ({code_n})"
     elif city and country:
-        text = f"{city}, {country}"
+        dest_text = f"{city}, {country}"
     elif code_n:
-        text = code_n
+        dest_text = code_n
     else:
         # absolute fallback: keep whatever came from snapshot
-        text = str(rec.get("destination_text") or rec.get("destination") or rec.get("Destination") or "-")
+        dest_text = str(_first_nonempty(rec, ["destination_text", "dest_text", "destination", "Destination"]) or "-")
 
-    return text, lat, lon
+    return dest_text, lat, lon
 
 
 # -----------------------------
@@ -615,18 +578,22 @@ def health() -> Dict[str, Any]:
         "ok": True,
         "push_enabled": PUSH_ENABLED,
         "snapshot_loaded": bool(SNAPSHOT),
+        "openpyxl_ok": _OPENPYXL_OK,
         "lookup_locations_loaded": len(LOCATION_BY_CODE),
         "lookup_destland_loaded": len(DESTLAND_BY_CODE),
-        "openpyxl_ok": _OPENPYXL_OK,
+        "lookup_paths": LOOKUP_PATHS,
     }
 
 
 @app.post("/api/upload")
-async def upload_snapshot(request: Request, secret: str = Query(..., min_length=8)) -> Dict[str, Any]:
+async def upload_snapshot(request: Request, secret: str = Query(..., min_length=4)) -> Dict[str, Any]:
     global SNAPSHOT, LAST_STATUS_KEY_BY_PLATE
 
     if not ADMIN_UPLOAD_SECRET:
-        raise HTTPException(status_code=500, detail="Server not configured: ADMIN_UPLOAD_SECRET missing.")
+        raise HTTPException(
+            status_code=500,
+            detail="Server not configured: missing ADMIN_UPLOAD_SECRET (or DRIVER_PORTAL_UPLOAD_SECRET).",
+        )
     if secret != ADMIN_UPLOAD_SECRET:
         raise HTTPException(status_code=401, detail="Unauthorized.")
 
@@ -683,7 +650,7 @@ def get_status(
     st = compute_driver_status(rec)
 
     dest_text, dlat, dlon = resolve_destination(rec)
-    nav = destination_nav_url(dlat, dlon)
+    nav = destination_nav_url(dlat, dlon, dest_text)
 
     return {
         "plate": normalize_plate(plate),
@@ -698,43 +665,6 @@ def get_status(
         "push_enabled": PUSH_ENABLED,
         "vapid_public_key": VAPID_PUBLIC_KEY if PUSH_ENABLED else "",
     }
-
-
-@app.get("/api/route")
-def get_route(
-    plate: str = Query(..., min_length=2),
-    lat: float = Query(...),
-    lon: float = Query(...),
-    ts: int = Query(..., description="Unix epoch seconds from the device"),
-) -> Dict[str, Any]:
-    """Return a zoomable route map polyline for the website."""
-    geofence_check(lat, lon, ts)
-
-    rec = _get_plate_record(plate)
-    if rec is None:
-        raise HTTPException(status_code=404, detail="No movement found for this plate.")
-
-    dest_text, dlat, dlon = resolve_destination(rec)
-    if dlat is None or dlon is None:
-        raise HTTPException(status_code=404, detail="Destination coordinates not available for this movement.")
-
-    origin_lat = float(HUB_LAT)
-    origin_lon = float(HUB_LON)
-    dest_lat = float(dlat)
-    dest_lon = float(dlon)
-
-    route_pts, note = build_route_points(origin_lat, origin_lon, dest_lat, dest_lon)
-
-    return {
-        "plate": normalize_plate(plate),
-        "origin": {"lat": origin_lat, "lon": origin_lon},
-        "dest": {"lat": dest_lat, "lon": dest_lon},
-        "route": route_pts,
-        "note": note,
-        "destination_text": dest_text,
-        "last_refresh": (SNAPSHOT or {}).get("last_update"),
-    }
-
 
 
 @app.post("/api/subscribe")
@@ -783,7 +713,6 @@ INDEX_HTML = r"""<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Driver Status</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -804,6 +733,7 @@ INDEX_HTML = r"""<!doctype html>
       border: 1px solid rgba(0,0,0,0.08);
       box-shadow: 0 10px 30px rgba(0,0,0,0.10);
     }
+
     input {
       font-size: 16px;
       padding: 10px 12px;
@@ -855,27 +785,27 @@ INDEX_HTML = r"""<!doctype html>
       background: linear-gradient(180deg, rgba(245,245,255,0.70) 0%, rgba(220,220,235,0.45) 100%);
       border: 1px solid rgba(255,255,255,0.35);
     }
+
     .row { display: flex; gap: 8px; }
     .row > * { flex: 1; }
     .row-main > input { flex: 1 1 auto; }
     .row-main > button { flex: 0 0 120px; }
-    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin-top: 12px; background: rgba(255,255,255,0.45); }
+
+    .card {
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      padding: 14px;
+      margin-top: 12px;
+      background: rgba(255,255,255,0.45);
+    }
     .muted { color: #666; }
     .status-big { font-size: 22px; font-weight: 700; line-height: 1.25; }
     .ok { border-color: #bfe6c3; }
     .warn { border-color: #ffd18a; }
     .err { border-color: #f5b5b5; }
-
-    #map {
-      height: 320px;
-      width: 100%;
-      border-radius: 12px;
-      border: 1px solid rgba(0,0,0,0.18);
-      overflow: hidden;
-      background: rgba(255,255,255,0.35);
-    }
-
     a { color: inherit; }
+    a.destlink { text-decoration: underline; font-weight: 700; cursor: pointer; }
+    a.destlink:active { filter: brightness(0.95); }
   </style>
 </head>
 <body>
@@ -896,81 +826,11 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
   <script>
     const API_BASE = window.location.origin;
 
     function normalizePlate(v) {
       return (v || "").toUpperCase().trim().replaceAll(" ", "").replaceAll("-", "");
-    }
-
-    let _map = null;
-    let _routeLine = null;
-
-    function destroyMap() {
-      try {
-        if (_map) _map.remove();
-      } catch (e) {}
-      _map = null;
-      _routeLine = null;
-    }
-
-    function setMapNote(msg, isErr) {
-      const el = document.getElementById("mapNote");
-      if (!el) return;
-      el.textContent = msg || "";
-      el.style.color = isErr ? "#a00000" : "";
-    }
-
-    async function renderRouteMap(plate, loc) {
-      const mapDiv = document.getElementById("map");
-      if (!mapDiv || typeof L === "undefined") return;
-
-      destroyMap();
-
-      _map = L.map("map", { zoomControl: true, scrollWheelZoom: true });
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: "&copy; OpenStreetMap contributors",
-      }).addTo(_map);
-
-      setMapNote("Loading route…", false);
-
-      try {
-        const url = `${API_BASE}/api/route?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}`;
-        const res = await fetch(url);
-        const data = await res.json();
-
-        if (!res.ok) {
-          setMapNote(data.detail || res.statusText, true);
-          _map.setView([loc.lat, loc.lon], 10);
-          setTimeout(() => { if (_map) _map.invalidateSize(); }, 80);
-          return;
-        }
-
-        const pts = data.route || [];
-        if (pts.length >= 2) {
-          _routeLine = L.polyline(pts, { color: "#4D148C", weight: 4, opacity: 0.9 }).addTo(_map);
-          _map.fitBounds(_routeLine.getBounds(), { padding: [12, 12] });
-        } else {
-          _map.setView([loc.lat, loc.lon], 10);
-        }
-
-        if (data.origin && data.origin.lat != null && data.origin.lon != null) {
-          L.marker([data.origin.lat, data.origin.lon]).addTo(_map).bindPopup("Origin");
-        }
-        if (data.dest && data.dest.lat != null && data.dest.lon != null) {
-          L.marker([data.dest.lat, data.dest.lon]).addTo(_map).bindPopup("Destination");
-        }
-
-        setMapNote(data.note || "", false);
-        setTimeout(() => { if (_map) _map.invalidateSize(); }, 80);
-      } catch (e) {
-        setMapNote("Route error: " + e, true);
-        try { _map.setView([loc.lat, loc.lon], 10); } catch (e2) {}
-        setTimeout(() => { if (_map) _map.invalidateSize(); }, 80);
-      }
     }
 
     function show(html, klass) {
@@ -1004,16 +864,14 @@ INDEX_HTML = r"""<!doctype html>
       const plate = normalizePlate(document.getElementById("plate").value);
       if (!plate) return;
 
-      destroyMap();
-
       show(`<div class="muted">Getting location…</div>`);
 
       let loc;
       try {
         loc = await getLocation();
       } catch (e) {
-        destroyMap();
         show(`<b>Location error:</b> ${e.message}<div class="muted">Enable GPS and allow location permission.</div>`, "err");
+        document.getElementById("btnNotify").style.display = "none";
         return;
       }
 
@@ -1025,7 +883,6 @@ INDEX_HTML = r"""<!doctype html>
         const data = await res.json();
 
         if (!res.ok) {
-          destroyMap();
           show(`<b>Error:</b> ${data.detail || res.statusText}`, "err");
           document.getElementById("btnNotify").style.display = "none";
           return;
@@ -1034,7 +891,6 @@ INDEX_HTML = r"""<!doctype html>
         const last = data.last_refresh || "-";
 
         if (!data.found) {
-          destroyMap();
           show(`
             <div class="status-big">No movement found</div>
             <div class="muted">Last refresh: ${last}</div>
@@ -1044,7 +900,9 @@ INDEX_HTML = r"""<!doctype html>
         }
 
         const destText = data.destination_text || "-";
-        const destLink = data.destination_nav_url ? `<a href="${data.destination_nav_url}" target="_blank" rel="noopener">${destText}</a>` : destText;
+        const destLink = data.destination_nav_url
+          ? `<a class="destlink" href="${data.destination_nav_url}" rel="noopener" onclick="window.location.href=this.href; return false;">${destText}</a>`
+          : destText;
 
         show(`
           <div class="status-big">"${data.status_text}"</div>
@@ -1053,13 +911,7 @@ INDEX_HTML = r"""<!doctype html>
           <div><b>Scheduled departure date/time:</b> ${data.scheduled_departure || "-"}</div>
           <div><b>Report in the office:</b> ${data.report_in_office_at || "-"}</div>
           <div class="muted" style="margin-top:8px;">Last refresh: ${last}</div>
-
-          <div style="margin-top:12px;"><b>Route map:</b></div>
-          <div id="map"></div>
-          <div id="mapNote" class="muted" style="margin-top:6px;"></div>
         `, "ok");
-
-        setTimeout(() => renderRouteMap(plate, loc), 0);
 
         if (data.push_enabled && data.vapid_public_key) {
           const bn = document.getElementById("btnNotify");
@@ -1070,7 +922,6 @@ INDEX_HTML = r"""<!doctype html>
         }
 
       } catch (e) {
-        destroyMap();
         show(`<b>Network error:</b> ${e}`, "err");
         document.getElementById("btnNotify").style.display = "none";
       }
@@ -1099,23 +950,7 @@ INDEX_HTML = r"""<!doctype html>
         }
 
         const reg = await navigator.serviceWorker.register('/sw.js');
-
-        // Wait until the service worker is activated (otherwise PushManager.subscribe can fail with "no active Service Worker")
-        const sw = reg.installing || reg.waiting || reg.active;
-        if (!sw) throw new Error("Service Worker registration failed.");
-        await new Promise((resolve, reject) => {
-          if (sw.state === 'activated') return resolve();
-          const t = setTimeout(() => reject(new Error("Service Worker activation timeout.")), 8000);
-          sw.addEventListener('statechange', () => {
-            if (sw.state === 'activated') {
-              clearTimeout(t);
-              resolve();
-            }
-          });
-        });
-
-        const existing = await reg.pushManager.getSubscription();
-        const sub = existing || await reg.pushManager.subscribe({
+        const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
         });
@@ -1148,16 +983,6 @@ INDEX_HTML = r"""<!doctype html>
 
 
 SERVICE_WORKER_JS = r"""
-self.addEventListener('install', function(event) {
-  // Activate immediately on first load
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', function(event) {
-  // Take control without requiring a reload
-  event.waitUntil(clients.claim());
-});
-
 self.addEventListener('push', function(event) {
   let data = {};
   try { data = event.data.json(); } catch (e) { data = { title: 'Update', body: event.data && event.data.text() }; }
