@@ -139,6 +139,11 @@ LAST_STATUS_KEY_BY_PLATE: Dict[str, str] = {}
 SUBSCRIPTIONS_BY_PLATE: Dict[str, List[Dict[str, Any]]] = {}
 MANUAL_STATUS_BY_PLATE: Dict[str, str] = {}
 STATUS_POLL_INTERVAL_SECONDS = 30
+# -----------------------------
+# Driver portal "viewed" tracking (in-memory)
+# -----------------------------
+PLATE_LAST_VIEW_UTC: Dict[str, str] = {}   # normalized_plate -> ISO timestamp (UTC)
+PLATE_VIEW_COUNT: Dict[str, int] = {}      # normalized_plate -> count
 
 
 # -----------------------------
@@ -781,6 +786,44 @@ async def upload_snapshot(request: Request, secret: str = Query(..., min_length=
 
     return {"ok": True, "count": len(SNAPSHOT.get("movements", []) or []), "push_enabled": PUSH_ENABLED}
 
+@app.get("/api/admin/plate_flags")
+def admin_plate_flags(
+    secret: str = Query(..., min_length=8),
+    plates: str = Query("", description="Comma-separated license plates"),
+) -> Dict[str, Any]:
+    if not ADMIN_UPLOAD_SECRET:
+        raise HTTPException(status_code=500, detail="Server not configured: ADMIN_UPLOAD_SECRET missing.")
+    if secret != ADMIN_UPLOAD_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
+    out: Dict[str, Any] = {}
+
+    for raw in (plates or "").split(","):
+        p = (raw or "").strip()
+        if not p:
+            continue
+
+        # Use your existing normalization helper if you have one.
+        # If your backend already has _norm_plate(), use that:
+        try:
+            plate_n = _norm_plate(p)  # type: ignore[name-defined]
+        except Exception:
+            # Fallback normalization (only if _norm_plate doesn't exist)
+            plate_n = re.sub(r"[^A-Z0-9]", "", p.upper())
+
+        subs = SUBSCRIPTIONS_BY_PLATE.get(plate_n) or []
+
+        out[plate_n] = {
+            "viewed": plate_n in PLATE_LAST_VIEW_UTC,
+            "last_view_utc": PLATE_LAST_VIEW_UTC.get(plate_n),
+            "view_count": PLATE_VIEW_COUNT.get(plate_n, 0),
+            "push_enabled": bool(subs),
+            "subscriber_count": len(subs),
+        }
+
+    return {"ok": True, "plates": out}
+
+
 @app.post("/api/driver_message")
 async def driver_message(request: Request, secret: str = Query(..., min_length=8)) -> Dict[str, Any]:
     global LAST_STATUS_KEY_BY_PLATE
@@ -838,6 +881,10 @@ def get_status(
             "found": False,
             "last_refresh": (SNAPSHOT or {}).get("last_update"),
         }
+    # --- mark plate as viewed (driver opened the page) ---
+    now_iso = datetime.utcnow().isoformat() + "Z"
+    PLATE_LAST_VIEW_UTC[plate_n] = now_iso
+    PLATE_VIEW_COUNT[plate_n] = PLATE_VIEW_COUNT.get(plate_n, 0) + 1
 
     st = compute_driver_status(rec)
 
