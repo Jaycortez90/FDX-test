@@ -459,8 +459,8 @@ def _load_xlsx_map_locations(path: str) -> Dict[str, Dict[str, Any]]:
 
     headers = [_clean_header(h) for h in header_row]
 
-    code_i = _find_col(headers, ["dest", "destcode", "code", "locationcode", "loccode", "stationcode", "facilitycode"])
-    city_i = _find_col(headers, ["city", "town", "name", "locationname"])
+    code_i = _find_col(headers, ["dest", "code", "locationcode", "loccode", "stationcode", "facilitycode", "destcode"])
+    city_i = _find_col(headers, ["destcity", "city", "town", "name", "locationname"])
     country_i = _find_col(headers, ["country", "land"])
     lat_i = _find_col(headers, ["lat", "latitude"])
     lon_i = _find_col(headers, ["lon", "lng", "long", "longitude"])
