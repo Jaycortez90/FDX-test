@@ -137,8 +137,8 @@ PUSH_ENABLED = bool(_PUSH_OK and VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY)
 SNAPSHOT: Optional[Dict[str, Any]] = None
 LAST_STATUS_KEY_BY_PLATE: Dict[str, str] = {}
 SUBSCRIPTIONS_BY_PLATE: Dict[str, List[Dict[str, Any]]] = {}
-
-STATUS_POLL_INTERVAL_SECONDS = 60
+MANUAL_STATUS_BY_PLATE: Dict[str, str] = {}
+STATUS_POLL_INTERVAL_SECONDS = 30
 
 
 # -----------------------------
@@ -244,6 +244,23 @@ def _has(v: Any) -> bool:
 
 
 def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
+    # Dispatcher manual status (Driver message) overrides computed status
+    plate_n = ""
+    try:
+        plate_n = normalize_plate(m.get("license_plate", ""))
+    except Exception:
+        plate_n = ""
+
+    msg = (MANUAL_STATUS_BY_PLATE.get(plate_n) if plate_n else "") or ""
+    msg = str(msg).strip()
+    if msg:
+        try:
+            import hashlib
+            key = "driver_message:" + hashlib.sha1(msg.encode("utf-8", "ignore")).hexdigest()[:12]
+        except Exception:
+            key = "driver_message"
+        return {"status_key": key, "status_text": msg, "report_in_office_at": ""}
+
     close_door = m.get("close_door", "")
     location = m.get("location", "")
     trailer = str(m.get("trailer", "") or "").strip()
@@ -758,6 +775,45 @@ async def upload_snapshot(request: Request, secret: str = Query(..., min_length=
             pass
 
     return {"ok": True, "count": len(SNAPSHOT.get("movements", []) or []), "push_enabled": PUSH_ENABLED}
+
+@app.post("/api/driver_message")
+async def driver_message(request: Request, secret: str = Query(..., min_length=8)) -> Dict[str, Any]:
+    global LAST_STATUS_KEY_BY_PLATE
+
+    if not ADMIN_UPLOAD_SECRET:
+        raise HTTPException(status_code=500, detail="Server not configured: ADMIN_UPLOAD_SECRET missing.")
+    if secret != ADMIN_UPLOAD_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid JSON body.")
+
+    plate = normalize_plate(str(body.get("plate", "")))
+    message = str(body.get("message", "") or "").strip()
+
+    if not plate:
+        raise HTTPException(status_code=400, detail="Missing 'plate'.")
+    if not message:
+        raise HTTPException(status_code=400, detail="Missing 'message'.")
+
+    # Save manual message
+    MANUAL_STATUS_BY_PLATE[plate] = message
+
+    # Force immediate push + update last key
+    st = compute_driver_status({"license_plate": plate})
+    try:
+        LAST_STATUS_KEY_BY_PLATE[plate] = st["status_key"]
+    except Exception:
+        pass
+
+    _push_to_plate(plate, "Message from dispatch", message)
+
+    return {"ok": True, "plate": plate, "message": message}
 
 
 @app.get("/api/status")
