@@ -1044,7 +1044,7 @@ INDEX_HTML = r"""<!doctype html>
         }
 
         const destText = data.destination_text || "-";
-        const destLink = data.destination_nav_url ? `<a href="${data.destination_nav_url}" target="_blank" rel="noopener">${destText}</a>` : destText;
+        const destLink = data.destination_nav_url ? `<a href="${data.destination_nav_url}" class="destlink" onclick="window.location.href=this.href; return false;">${destText}</a>` : destText;
 
         show(`
           <div class="status-big">"${data.status_text}"</div>
