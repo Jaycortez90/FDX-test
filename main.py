@@ -50,54 +50,8 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Excel lookup files (server-side destination calculation)
-# Optional env overrides:
-#   - LOCATIONS_XLSX: path to FedEx_locations.xlsx / .xlsm
-#   - DEST_LAND_XLSX: path to dest-land.xlsx / .xlsm
-LOCATIONS_XLSX_ENV = os.environ.get("LOCATIONS_XLSX", "").strip()
-DEST_LAND_XLSX_ENV = os.environ.get("DEST_LAND_XLSX", "").strip()
-
-
-def _pick_existing_path(candidates: List[str]) -> str:
-    first_non_empty = ""
-    for p in candidates:
-        p = (p or "").strip()
-        if p and not first_non_empty:
-            first_non_empty = p
-        if p and os.path.exists(p):
-            return p
-    return first_non_empty
-
-
-def _locations_path() -> str:
-    # Prefer env var, otherwise try common locations
-    candidates = [
-        LOCATIONS_XLSX_ENV,
-        os.path.join(DATA_DIR, "FedEx_locations.xlsx"),
-        os.path.join(DATA_DIR, "FedEx_locations.xlsm"),
-        os.path.join(BASE_DIR, "FedEx_locations.xlsx"),
-        os.path.join(os.getcwd(), "data", "FedEx_locations.xlsx"),
-        os.path.join(os.getcwd(), "FedEx_locations.xlsx"),
-    ]
-    return _pick_existing_path(candidates)
-
-
-def _dest_land_path() -> str:
-    candidates = [
-        DEST_LAND_XLSX_ENV,
-        os.path.join(DATA_DIR, "dest-land.xlsx"),
-        os.path.join(DATA_DIR, "dest-land.xlsm"),
-        os.path.join(DATA_DIR, "dest_land.xlsx"),
-        os.path.join(DATA_DIR, "dest_land.xlsm"),
-        os.path.join(BASE_DIR, "dest-land.xlsx"),
-        os.path.join(BASE_DIR, "dest-land.xlsm"),
-        os.path.join(os.getcwd(), "data", "dest-land.xlsx"),
-        os.path.join(os.getcwd(), "dest-land.xlsx"),
-    ]
-    return _pick_existing_path(candidates)
-
-
-LOCATIONS_XLSX = _locations_path()
-DEST_LAND_XLSX = _dest_land_path()
+LOCATIONS_XLSX = os.path.join(DATA_DIR, "FedEx_locations.xlsx")
+DEST_LAND_XLSX = os.path.join(DATA_DIR, "dest-land.xlsx")
 
 # Loaded at startup
 LOCATION_BY_CODE: Dict[str, Dict[str, Any]] = {}
