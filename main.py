@@ -477,7 +477,12 @@ def _push_to_plate(plate: str, title: str, body: str) -> None:
         return
 
     vapid_claims = {"sub": VAPID_SUBJECT}
-    payload = json.dumps({"title": title, "body": body})
+    payload = json.dumps({
+        "title": title,
+        "body": body,
+        "plate": plate,
+        "url": f"/?plate={urllib.parse.quote(plate)}",
+    })
 
     alive = []
     for sub in subs:
@@ -1156,6 +1161,8 @@ INDEX_HTML = r"""<!doctype html>
 
     async function checkStatus() {
       const plate = normalizePlate(document.getElementById("plate").value);
+      try { localStorage.setItem("last_plate", plate); } catch (e) {}
+
       if (!plate) return;
 
       destroyMap();
@@ -1220,6 +1227,9 @@ INDEX_HTML = r"""<!doctype html>
           bn.style.display = "block";
           bn.onclick = () => enableNotifications(plate, loc, data.vapid_public_key);
         } else {
+          bn.disabled = false;
+          bn.textContent = "Enable notifications";
+
           document.getElementById("btnNotify").style.display = "none";
         }
 
@@ -1286,7 +1296,15 @@ INDEX_HTML = r"""<!doctype html>
           return;
         }
 
-        show(`<b>Notifications enabled</b><div class="muted">You will receive a push when your status changes.</div>`, "ok");
+        const bn2 = document.getElementById("btnNotify");
+        bn2.style.display = "block";
+        bn2.textContent = "Notifications enabled";
+        bn2.disabled = true;
+
+        const out = document.getElementById("out");
+        if (out && out.style.display !== "none") {
+          out.innerHTML = out.innerHTML + `<div class="muted" style="margin-top:10px;">Notifications enabled for this license plate.</div>`;
+        }
       } catch (e) {
         show(`<b>Subscribe error:</b> ${e}`, "err");
       }
@@ -1296,6 +1314,18 @@ INDEX_HTML = r"""<!doctype html>
     document.getElementById("plate").addEventListener("keydown", (e) => {
       if (e.key === "Enter") checkStatus();
     });
+    // Auto-load plate from URL (?plate=...) or from last used plate
+    (function initPlate() {
+      try {
+        const qs = new URLSearchParams(window.location.search);
+        const p = normalizePlate(qs.get("plate") || "") || normalizePlate(localStorage.getItem("last_plate") || "");
+        if (p) {
+          document.getElementById("plate").value = p;
+          checkStatus();
+        }
+      } catch (e) {}
+    })();
+
   </script>
 </body>
 </html>"""
@@ -1314,14 +1344,41 @@ self.addEventListener('activate', function(event) {
 
 self.addEventListener('push', function(event) {
   let data = {};
-  try { data = event.data.json(); } catch (e) { data = { title: 'Update', body: event.data && event.data.text() }; }
+  try { data = event.data.json(); }
+  catch (e) { data = { title: 'Update', body: event.data && event.data.text() }; }
+
   const title = data.title || 'Status update';
-  const options = { body: data.body || '' };
+  const options = {
+    body: data.body || '',
+    data: { url: data.url || '/' }
+  };
+
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener('notificationclick', function(event) {
+  const url = (event.notification.data && event.notification.data.url) ? event.notification.data.url : '/';
   event.notification.close();
-  event.waitUntil(clients.openWindow('/'));
+
+  event.waitUntil((async () => {
+    const fullUrl = new URL(url, self.registration.scope).href;
+    const allClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+
+    for (const client of allClients) {
+      if (client.url === fullUrl) {
+        await client.focus();
+        return;
+      }
+    }
+
+    if (allClients.length) {
+      await allClients[0].focus();
+      await allClients[0].navigate(fullUrl);
+      return;
+    }
+
+    return clients.openWindow(fullUrl);
+  })());
 });
 """
+
