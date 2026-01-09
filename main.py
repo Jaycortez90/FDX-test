@@ -1148,7 +1148,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="status-big">"${data.status_text}"</div>
           <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
           <div><b>Destination:</b> ${destLink}</div>
-          <div><b>Scheduled departure date/time:</b> ${data.scheduled_departure || "-"}</div>
+          <div><b>Departure time:</b> ${data.scheduled_departure || "-"}</div>
           <div><b>Report in the office:</b> ${data.report_in_office_at || "-"}</div>
           <div class="muted" style="margin-top:8px;">Last refresh: ${last}</div>
 
