@@ -359,6 +359,63 @@ def _fetch_ors_route_coords(
     except Exception:
         return None
 
+def _fetch_osrm_route_coords(
+    origin_lat: float,
+    origin_lon: float,
+    dest_lat: float,
+    dest_lon: float,
+) -> Optional[List[Tuple[float, float]]]:
+    """
+    Return route coordinates as (lat, lon) pairs using OSRM (public demo).
+    This does NOT require an API key.
+    Returns None on any failure.
+    """
+    try:
+        base = (os.environ.get("OSRM_BASE_URL", "https://router.project-osrm.org") or "").strip().rstrip("/")
+        if not base:
+            base = "https://router.project-osrm.org"
+
+        url = (
+            f"{base}/route/v1/driving/"
+            f"{origin_lon:.6f},{origin_lat:.6f};{dest_lon:.6f},{dest_lat:.6f}"
+            f"?overview=full&geometries=geojson"
+        )
+
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "DriverStatus/1.0",
+            },
+            method="GET",
+        )
+
+        with urllib.request.urlopen(req, timeout=7) as resp:
+            raw = resp.read()
+
+        data = json.loads(raw.decode("utf-8", errors="ignore") or "{}")
+        routes = data.get("routes") or []
+        if not routes:
+            return None
+
+        geom = routes[0].get("geometry") or {}
+        coords = geom.get("coordinates") or []
+        if not coords:
+            return None
+
+        # coords are [lon, lat]
+        pts = [(float(lat), float(lon)) for lon, lat in coords]
+
+        # Downsample if extremely dense (keep max ~1200 points)
+        if len(pts) > 1200:
+            step = int(math.ceil(len(pts) / 1200.0))
+            pts = pts[::step]
+            if pts and pts[-1] != (float(dest_lat), float(dest_lon)):
+                pts.append((float(dest_lat), float(dest_lon)))
+
+        return pts
+    except Exception:
+        return None
 
 def build_route_points(
     origin_lat: float,
@@ -371,11 +428,14 @@ def build_route_points(
     if pts:
         return [[lat, lon] for (lat, lon) in pts], "Route source: OpenRouteService"
 
+    pts2 = _fetch_osrm_route_coords(origin_lat, origin_lon, dest_lat, dest_lon)
+    if pts2:
+        return [[lat, lon] for (lat, lon) in pts2], "Route source: OSRM"
+
     return [
         [float(origin_lat), float(origin_lon)],
         [float(dest_lat), float(dest_lon)],
     ], "Route source: direct line"
-
 
 
 def _get_plate_record(plate: str) -> Optional[Dict[str, Any]]:
