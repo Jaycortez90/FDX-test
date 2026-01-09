@@ -139,11 +139,6 @@ LAST_STATUS_KEY_BY_PLATE: Dict[str, str] = {}
 SUBSCRIPTIONS_BY_PLATE: Dict[str, List[Dict[str, Any]]] = {}
 MANUAL_STATUS_BY_PLATE: Dict[str, str] = {}
 STATUS_POLL_INTERVAL_SECONDS = 30
-# -----------------------------
-# Driver portal "viewed" tracking (in-memory)
-# -----------------------------
-PLATE_LAST_VIEW_UTC: Dict[str, str] = {}   # normalized_plate -> ISO timestamp (UTC)
-PLATE_VIEW_COUNT: Dict[str, int] = {}      # normalized_plate -> count
 
 
 # -----------------------------
@@ -163,7 +158,7 @@ async def _startup():
         while True:
             try:
                 if SNAPSHOT:
-                    for m in (SNAPSHOT.get("movements", []) or []):
+                    for m in _snapshot_movements():
                         plate = normalize_plate(m.get("license_plate", ""))
                         if not plate:
                             continue
@@ -460,11 +455,36 @@ def build_route_points(
     ], "Route source: direct line"
 
 
+def _snapshot_movements() -> List[Dict[str, Any]]:
+    """Return a sanitized list of movement dicts from SNAPSHOT['movements'].
+
+    Accepts either:
+      - list[dict]
+      - dict[Any, dict] (values will be used)
+    Any non-dict items are ignored.
+    """
+    if not SNAPSHOT or not isinstance(SNAPSHOT, dict):
+        return []
+
+    moves = SNAPSHOT.get("movements")
+    if isinstance(moves, dict):
+        moves = list(moves.values())
+
+    if not isinstance(moves, list):
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for m in moves:
+        if isinstance(m, dict):
+            out.append(m)
+    return out
+
+
 def _get_plate_record(plate: str) -> Optional[Dict[str, Any]]:
-    global SNAPSHOT
-    if not SNAPSHOT:
+    moves = _snapshot_movements()
+    if not moves:
         return None
-    moves = SNAPSHOT.get("movements", []) or []
+
     plate_n = normalize_plate(plate)
     matches = [m for m in moves if normalize_plate(m.get("license_plate", "")) == plate_n]
     if len(matches) == 1:
@@ -482,12 +502,7 @@ def _push_to_plate(plate: str, title: str, body: str) -> None:
         return
 
     vapid_claims = {"sub": VAPID_SUBJECT}
-    payload = json.dumps({
-        "title": title,
-        "body": body,
-        "plate": plate,
-        "url": f"/?plate={urllib.parse.quote(plate)}",
-    })
+    payload = json.dumps({"title": title, "body": body, "url": f"/?plate={urllib.parse.quote(plate)}"})
 
     alive = []
     for sub in subs:
@@ -765,10 +780,16 @@ async def upload_snapshot(request: Request, secret: str = Query(..., min_length=
 
     SNAPSHOT = body
 
+    # Normalize movements to a list[dict] (client might send a dict/map)
+    try:
+        SNAPSHOT["movements"] = _snapshot_movements()
+    except Exception:
+        SNAPSHOT["movements"] = []
+
     # Push notifications on status change (best-effort)
     if PUSH_ENABLED:
         try:
-            for m in (SNAPSHOT.get("movements", []) or []):
+            for m in _snapshot_movements():
                 plate = normalize_plate(m.get("license_plate", ""))
                 if not plate:
                     continue
@@ -784,45 +805,7 @@ async def upload_snapshot(request: Request, secret: str = Query(..., min_length=
         except Exception:
             pass
 
-    return {"ok": True, "count": len(SNAPSHOT.get("movements", []) or []), "push_enabled": PUSH_ENABLED}
-
-@app.get("/api/admin/plate_flags")
-def admin_plate_flags(
-    secret: str = Query(..., min_length=8),
-    plates: str = Query("", description="Comma-separated license plates"),
-) -> Dict[str, Any]:
-    if not ADMIN_UPLOAD_SECRET:
-        raise HTTPException(status_code=500, detail="Server not configured: ADMIN_UPLOAD_SECRET missing.")
-    if secret != ADMIN_UPLOAD_SECRET:
-        raise HTTPException(status_code=401, detail="Unauthorized.")
-
-    out: Dict[str, Any] = {}
-
-    for raw in (plates or "").split(","):
-        p = (raw or "").strip()
-        if not p:
-            continue
-
-        # Use your existing normalization helper if you have one.
-        # If your backend already has _norm_plate(), use that:
-        try:
-            plate_n = _norm_plate(p)  # type: ignore[name-defined]
-        except Exception:
-            # Fallback normalization (only if _norm_plate doesn't exist)
-            plate_n = re.sub(r"[^A-Z0-9]", "", p.upper())
-
-        subs = SUBSCRIPTIONS_BY_PLATE.get(plate_n) or []
-
-        out[plate_n] = {
-            "viewed": plate_n in PLATE_LAST_VIEW_UTC,
-            "last_view_utc": PLATE_LAST_VIEW_UTC.get(plate_n),
-            "view_count": PLATE_VIEW_COUNT.get(plate_n, 0),
-            "push_enabled": bool(subs),
-            "subscriber_count": len(subs),
-        }
-
-    return {"ok": True, "plates": out}
-
+    return {"ok": True, "count": len(_snapshot_movements()), "push_enabled": PUSH_ENABLED}
 
 @app.post("/api/driver_message")
 async def driver_message(request: Request, secret: str = Query(..., min_length=8)) -> Dict[str, Any]:
@@ -881,10 +864,6 @@ def get_status(
             "found": False,
             "last_refresh": (SNAPSHOT or {}).get("last_update"),
         }
-    # --- mark plate as viewed (driver opened the page) ---
-    now_iso = datetime.utcnow().isoformat() + "Z"
-    PLATE_LAST_VIEW_UTC[plate_n] = now_iso
-    PLATE_VIEW_COUNT[plate_n] = PLATE_VIEW_COUNT.get(plate_n, 0) + 1
 
     st = compute_driver_status(rec)
 
@@ -1111,6 +1090,39 @@ INDEX_HTML = r"""<!doctype html>
       return (v || "").toUpperCase().trim().replaceAll(" ", "").replaceAll("-", "");
     }
 
+    function getInitialPlate() {
+      try {
+        const p = new URLSearchParams(window.location.search).get("plate") || "";
+        const pn = normalizePlate(p);
+        if (pn) return pn;
+      } catch (e) {}
+      try {
+        return normalizePlate(localStorage.getItem("last_plate") || "");
+      } catch (e) {
+        return "";
+      }
+    }
+
+    function setCurrentPlate(p) {
+      const pn = normalizePlate(p);
+      if (!pn) return;
+      try { localStorage.setItem("last_plate", pn); } catch (e) {}
+      try {
+        const u = new URL(window.location.href);
+        u.searchParams.set("plate", pn);
+        history.replaceState(null, "", u.toString());
+      } catch (e) {}
+    }
+
+    async function readJsonOrText(res) {
+      const ct = (res.headers.get("content-type") || "").toLowerCase();
+      if (ct.includes("application/json")) {
+        return await res.json();
+      }
+      const txt = await res.text();
+      return { detail: txt };
+    }
+
     let _map = null;
     let _routeLine = null;
 
@@ -1146,7 +1158,7 @@ INDEX_HTML = r"""<!doctype html>
       try {
         const url = `${API_BASE}/api/route?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}`;
         const res = await fetch(url);
-        const data = await res.json();
+        const data = await readJsonOrText(res);
 
         if (!res.ok) {
           setMapNote(data.detail || res.statusText, true);
@@ -1208,9 +1220,9 @@ INDEX_HTML = r"""<!doctype html>
 
     async function checkStatus() {
       const plate = normalizePlate(document.getElementById("plate").value);
-      try { localStorage.setItem("last_plate", plate); } catch (e) {}
-
       if (!plate) return;
+
+      setCurrentPlate(plate);
 
       destroyMap();
 
@@ -1230,7 +1242,7 @@ INDEX_HTML = r"""<!doctype html>
       try {
         const url = `${API_BASE}/api/status?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}`;
         const res = await fetch(url);
-        const data = await res.json();
+        const data = await readJsonOrText(res);
 
         if (!res.ok) {
           destroyMap();
@@ -1274,9 +1286,6 @@ INDEX_HTML = r"""<!doctype html>
           bn.style.display = "block";
           bn.onclick = () => enableNotifications(plate, loc, data.vapid_public_key);
         } else {
-          bn.disabled = false;
-          bn.textContent = "Enable notifications";
-
           document.getElementById("btnNotify").style.display = "none";
         }
 
@@ -1337,21 +1346,13 @@ INDEX_HTML = r"""<!doctype html>
           body: JSON.stringify(sub),
         });
 
-        const data = await resp.json();
+        const data = await readJsonOrText(resp);
         if (!resp.ok) {
           show(`<b>Subscribe failed:</b> ${data.detail || resp.statusText}`, "err");
           return;
         }
 
-        const bn2 = document.getElementById("btnNotify");
-        bn2.style.display = "block";
-        bn2.textContent = "Notifications enabled";
-        bn2.disabled = true;
-
-        const out = document.getElementById("out");
-        if (out && out.style.display !== "none") {
-          out.innerHTML = out.innerHTML + `<div class="muted" style="margin-top:10px;">Notifications enabled for this license plate.</div>`;
-        }
+        show(`<b>Notifications enabled</b><div class="muted">You will receive a push when your status changes.</div>`, "ok");
       } catch (e) {
         show(`<b>Subscribe error:</b> ${e}`, "err");
       }
@@ -1361,18 +1362,15 @@ INDEX_HTML = r"""<!doctype html>
     document.getElementById("plate").addEventListener("keydown", (e) => {
       if (e.key === "Enter") checkStatus();
     });
-    // Auto-load plate from URL (?plate=...) or from last used plate
-    (function initPlate() {
-      try {
-        const qs = new URLSearchParams(window.location.search);
-        const p = normalizePlate(qs.get("plate") || "") || normalizePlate(localStorage.getItem("last_plate") || "");
-        if (p) {
-          document.getElementById("plate").value = p;
-          checkStatus();
-        }
-      } catch (e) {}
-    })();
 
+    // Restore plate from URL or last usage and auto-run once
+    (function initPlate() {
+      const p = getInitialPlate();
+      if (p) {
+        document.getElementById("plate").value = p;
+        setTimeout(() => { checkStatus(); }, 50);
+      }
+    })();
   </script>
 </body>
 </html>"""
@@ -1391,41 +1389,15 @@ self.addEventListener('activate', function(event) {
 
 self.addEventListener('push', function(event) {
   let data = {};
-  try { data = event.data.json(); }
-  catch (e) { data = { title: 'Update', body: event.data && event.data.text() }; }
-
+  try { data = event.data.json(); } catch (e) { data = { title: 'Update', body: event.data && event.data.text() }; }
   const title = data.title || 'Status update';
-  const options = {
-    body: data.body || '',
-    data: { url: data.url || '/' }
-  };
-
+  const options = { body: data.body || '', data: { url: (data.url || '/') } };
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener('notificationclick', function(event) {
-  const url = (event.notification.data && event.notification.data.url) ? event.notification.data.url : '/';
   event.notification.close();
-
-  event.waitUntil((async () => {
-    const fullUrl = new URL(url, self.registration.scope).href;
-    const allClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
-
-    for (const client of allClients) {
-      if (client.url === fullUrl) {
-        await client.focus();
-        return;
-      }
-    }
-
-    if (allClients.length) {
-      await allClients[0].focus();
-      await allClients[0].navigate(fullUrl);
-      return;
-    }
-
-    return clients.openWindow(fullUrl);
-  })());
+  const url = (event.notification && event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(clients.openWindow(url));
 });
 """
-
