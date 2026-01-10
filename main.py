@@ -138,6 +138,7 @@ SNAPSHOT: Optional[Dict[str, Any]] = None
 LAST_STATUS_KEY_BY_PLATE: Dict[str, str] = {}
 SUBSCRIPTIONS_BY_PLATE: Dict[str, List[Dict[str, Any]]] = {}
 MANUAL_STATUS_BY_PLATE: Dict[str, str] = {}
+VIEWED_BY_PLATE: Dict[str, Dict[str, Any]] = {}  # plate -> {count:int, last_view:str}
 STATUS_POLL_INTERVAL_SECONDS = 30
 
 
@@ -870,6 +871,18 @@ def get_status(
     dest_text, dlat, dlon = resolve_destination(rec)
     nav = destination_nav_url(dlat, dlon, dest_text)
 
+
+    # Mark that this plate was checked on the website (used by desktop for 👁 icon)
+    try:
+        p = normalize_plate(plate)
+        prev = VIEWED_BY_PLATE.get(p) or {}
+        VIEWED_BY_PLATE[p] = {
+            "count": int(prev.get("count", 0)) + 1,
+            "last_view": datetime.utcnow().isoformat() + "Z",
+        }
+    except Exception:
+        pass
+
     return {
         "plate": normalize_plate(plate),
         "found": True,
@@ -883,6 +896,33 @@ def get_status(
         "push_enabled": PUSH_ENABLED,
         "vapid_public_key": VAPID_PUBLIC_KEY if PUSH_ENABLED else "",
     }
+
+
+@app.get("/api/admin/plate_flags")
+def get_plate_flags(
+    secret: str = Query(..., min_length=8),
+    plates: str = Query("", description="Comma-separated list of plates"),
+) -> Dict[str, Any]:
+    if not ADMIN_UPLOAD_SECRET:
+        raise HTTPException(status_code=500, detail="Server not configured: ADMIN_UPLOAD_SECRET missing.")
+    if secret != ADMIN_UPLOAD_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
+    out: Dict[str, Any] = {}
+    raw = (plates or "").strip()
+    plate_list = [p for p in (raw.split(",") if raw else []) if p.strip()]
+
+    for p in plate_list:
+        np = normalize_plate(p)
+        v = VIEWED_BY_PLATE.get(np) or {}
+        out[np] = {
+            "viewed": bool(v),
+            "last_view": v.get("last_view", "") if isinstance(v, dict) else "",
+            "count": int(v.get("count", 0)) if isinstance(v, dict) else 0,
+            "push_enabled": bool(SUBSCRIPTIONS_BY_PLATE.get(np)),
+        }
+
+    return {"ok": True, "plates": out}
 
 
 @app.get("/api/route")
