@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Query, Request, Body
-from fastapi.responses import HTMLResponse, Response, FileResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 try:
@@ -244,32 +244,6 @@ def _has(v: Any) -> bool:
     return bool(s) and s.lower() not in {"nan", "none", "nat"}
 
 
-def _is_departed_movement(m: Dict[str, Any]) -> bool:
-    """Return True if the movement should be treated as departed."""
-    try:
-        if m.get("departed") is True:
-            return True
-    except Exception:
-        pass
-
-    if _has(m.get("departed_at")):
-        return True
-
-    # Common fallback keys (desktop snapshots may use different naming)
-    for k in [
-        "Departed", "departed_time",
-        "actual_departure", "actual_departure_dt", "Actual departure date/time", "Actual departure date/time_ROCS",
-        "ATD", "atd",
-    ]:
-        try:
-            if _has(m.get(k)):
-                return True
-        except Exception:
-            continue
-
-    return False
-
-
 def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
     # Dispatcher manual status (Driver message) overrides computed status
     plate_n = ""
@@ -288,8 +262,13 @@ def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
             key = "driver_message"
         return {"status_key": key, "status_text": msg, "report_in_office_at": ""}
 
-    # Departed status (shown to drivers)
-    if _is_departed_movement(m):
+    # Departed override (after manual status)
+    departed = m.get("departed", False)
+    if isinstance(departed, str):
+        departed = departed.strip().lower() in {"1", "true", "yes", "y"}
+    if not departed:
+        departed = _has(m.get("departed_at", ""))
+    if departed:
         return {"status_key": "DEPARTED", "status_text": "Drive safe, we wait you back!", "report_in_office_at": ""}
 
     close_door = m.get("close_door", "")
@@ -522,38 +501,7 @@ def _get_plate_record(plate: str) -> Optional[Dict[str, Any]]:
         return matches[0]
     if len(matches) == 0:
         return None
-
-    # If multiple records exist for a plate, pick the most relevant one for the driver:
-    #  - Prefer NOT departed
-    #  - Then prefer records with a Location
-    #  - Then prefer records with CloseDoor
-    #  - Then fall back to scheduled departure proximity (best-effort)
-    def _priority(rec: Dict[str, Any]) -> int:
-        dep = _is_departed_movement(rec)
-        loc = _has(rec.get("location", ""))
-        cd = _has(rec.get("close_door", ""))
-
-        score = 0
-        if loc:
-            score += 100
-        elif cd:
-            score += 80
-        else:
-            sched_dt = _parse_dt(rec.get("scheduled_departure", ""))
-            if sched_dt:
-                mins = (sched_dt - datetime.now()).total_seconds() / 60.0
-                if mins <= 45:
-                    score += 60
-                else:
-                    score += 40
-            else:
-                score += 30
-
-        if dep:
-            score -= 1000
-        return score
-
-    return max(matches, key=_priority)
+    raise HTTPException(status_code=409, detail="Multiple movements found for this plate. Contact the office.")
 
 
 def _push_to_plate(plate: str, title: str, body: str) -> None:
@@ -953,8 +901,6 @@ def get_status(
         "destination_nav_url": nav,
         "scheduled_departure": rec.get("scheduled_departure") or "",
         "report_in_office_at": st["report_in_office_at"],
-        "trailer": rec.get("trailer") or "",
-        "location": rec.get("location") or "",
         "last_refresh": (SNAPSHOT or {}).get("last_update"),
         "push_enabled": PUSH_ENABLED,
         "vapid_public_key": VAPID_PUBLIC_KEY if PUSH_ENABLED else "",
@@ -1057,22 +1003,6 @@ def sw() -> Response:
     return Response(content=SERVICE_WORKER_JS, media_type="application/javascript")
 
 
-
-
-@app.get("/favicon.ico")
-def favicon() -> Response:
-    # Preferred location: static/favicon.ico
-    # Fallback: static/app_icon_round.ico
-    cand = [
-        os.path.join(STATIC_DIR, "favicon.ico"),
-        os.path.join(STATIC_DIR, "app_icon_round.ico"),
-    ]
-    for p in cand:
-        if os.path.exists(p):
-            return FileResponse(p, media_type="image/x-icon")
-    return Response(status_code=404)
-
-
 @app.get("/")
 def index() -> HTMLResponse:
     return HTMLResponse(INDEX_HTML)
@@ -1087,7 +1017,6 @@ INDEX_HTML = r"""<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Driver Status</title>
-  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     body {
@@ -1197,8 +1126,6 @@ INDEX_HTML = r"""<!doctype html>
         <button id="btnNotify" class="btn btn-secondary" style="display:none;">Enable notifications</button>
       </div>
 
-      <div id="notifyState" class="muted" style="margin-top:6px; display:none;"></div>
-
       <div id="out" class="card" style="display:none;"></div>
     </div>
   </div>
@@ -1211,42 +1138,6 @@ INDEX_HTML = r"""<!doctype html>
     function normalizePlate(v) {
       return (v || "").toUpperCase().trim().replaceAll(" ", "").replaceAll("-", "");
     }
-
-    function formatPlace(raw) {
-      const s = (raw || "").toString().trim();
-      if (!s) return "-";
-      const up = s.toUpperCase();
-
-      // If begins with "P" -> Parking <number after P>
-      if (up.startsWith("P") && up.length > 1) {
-        const rest = up.slice(1).trim();
-        const m = rest.match(/(\d+)/);
-        const num = m ? m[1] : rest;
-        return "Parking " + (num || rest || "-");
-      }
-
-      // If begins with a number -> Dock <location>
-      if (/^\d/.test(up)) {
-        return "Dock " + s;
-      }
-
-      return s;
-    }
-
-    function setNotifyState(msg, isErr) {
-      const el = document.getElementById("notifyState");
-      if (!el) return;
-      const t = (msg || "").toString().trim();
-      if (!t) {
-        el.style.display = "none";
-        el.textContent = "";
-        return;
-      }
-      el.style.display = "block";
-      el.textContent = t;
-      el.style.color = isErr ? "#a00000" : "";
-    }
-
 
     function getInitialPlate() {
       try {
@@ -1424,22 +1315,12 @@ INDEX_HTML = r"""<!doctype html>
         const destText = data.destination_text || "-";
         const destLink = data.destination_nav_url ? `<a href="${data.destination_nav_url}" target="_blank" rel="noopener">${destText}</a>` : destText;
 
-        let placeInfoHtml = "";
-        const rawLoc = (data.location || "").toString().trim();
-        if (rawLoc) {
-          const tr = (data.trailer || "").toString().trim();
-          const place = formatPlace(rawLoc);
-          placeInfoHtml = `<div><b>Trailer:</b> ${tr || "-"}</div><div><b>Place:</b> ${place}</div>`;
-        }
-
-
         show(`
           <div class="status-big">"${data.status_text}"</div>
           <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
           <div><b>Destination:</b> ${destLink}</div>
           <div><b>Departure time:</b> ${data.scheduled_departure || "-"}</div>
           <div><b>Report in the office:</b> ${data.report_in_office_at || "-"}</div>
-          ${placeInfoHtml}
           <div class="muted" style="margin-top:8px;">Last refresh: ${last}</div>
 
           <div style="margin-top:12px;"><b>Route map:</b></div>
@@ -1452,13 +1333,9 @@ INDEX_HTML = r"""<!doctype html>
         if (data.push_enabled && data.vapid_public_key) {
           const bn = document.getElementById("btnNotify");
           bn.style.display = "block";
-          bn.disabled = false;
-          bn.textContent = "Enable notifications";
-          setNotifyState("", false);
           bn.onclick = () => enableNotifications(plate, loc, data.vapid_public_key);
         } else {
           document.getElementById("btnNotify").style.display = "none";
-          setNotifyState("", false);
         }
 
       } catch (e) {
@@ -1480,13 +1357,13 @@ INDEX_HTML = r"""<!doctype html>
     async function enableNotifications(plate, loc, vapidPublicKey) {
       try {
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-          setNotifyState("Notifications not supported. Use Chrome/Edge. On iOS add the site to Home Screen.", true);
+          show(`<b>Notifications not supported</b><div class="muted">Use Chrome/Edge on Android. iOS requires adding the site to Home Screen.</div>`, "warn");
           return;
         }
 
         const perm = await Notification.requestPermission();
         if (perm !== 'granted') {
-          setNotifyState("Notifications denied. Allow notifications in browser settings.", true);
+          show(`<b>Notifications denied</b><div class="muted">Allow notifications in browser settings.</div>`, "warn");
           return;
         }
 
@@ -1520,19 +1397,13 @@ INDEX_HTML = r"""<!doctype html>
 
         const data = await readJsonOrText(resp);
         if (!resp.ok) {
-          setNotifyState("Subscribe failed: " + (data.detail || resp.statusText), true);
+          show(`<b>Subscribe failed:</b> ${data.detail || resp.statusText}`, "err");
           return;
         }
 
-        setNotifyState("Notifications turned on.", false);
-
-        const bn = document.getElementById("btnNotify");
-        if (bn) {
-          bn.textContent = "Notifications ON";
-          bn.disabled = true;
-        }
+        show(`<b>Notifications enabled</b><div class="muted">You will receive a push when your status changes.</div>`, "ok");
       } catch (e) {
-        setNotifyState("Subscribe error: " + e, true);
+        show(`<b>Subscribe error:</b> ${e}`, "err");
       }
     }
 
