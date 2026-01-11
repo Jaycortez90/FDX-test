@@ -892,6 +892,8 @@ def get_status(
         "destination_nav_url": nav,
         "scheduled_departure": rec.get("scheduled_departure") or "",
         "report_in_office_at": st["report_in_office_at"],
+        "trailer": rec.get("trailer") or "",
+        "location": rec.get("location") or "",
         "last_refresh": (SNAPSHOT or {}).get("last_update"),
         "push_enabled": PUSH_ENABLED,
         "vapid_public_key": VAPID_PUBLIC_KEY if PUSH_ENABLED else "",
@@ -1117,6 +1119,8 @@ INDEX_HTML = r"""<!doctype html>
         <button id="btnNotify" class="btn btn-secondary" style="display:none;">Enable notifications</button>
       </div>
 
+      <div id="notifyState" class="muted" style="margin-top:6px; display:none;"></div>
+
       <div id="out" class="card" style="display:none;"></div>
     </div>
   </div>
@@ -1129,6 +1133,42 @@ INDEX_HTML = r"""<!doctype html>
     function normalizePlate(v) {
       return (v || "").toUpperCase().trim().replaceAll(" ", "").replaceAll("-", "");
     }
+
+    function formatPlace(raw) {
+      const s = (raw || "").toString().trim();
+      if (!s) return "-";
+      const up = s.toUpperCase();
+
+      // If begins with "P" -> Parking <number after P>
+      if (up.startsWith("P") && up.length > 1) {
+        const rest = up.slice(1).trim();
+        const m = rest.match(/(\d+)/);
+        const num = m ? m[1] : rest;
+        return "Parking " + (num || rest || "-");
+      }
+
+      // If begins with a number -> Dock <location>
+      if (/^\d/.test(up)) {
+        return "Dock " + s;
+      }
+
+      return s;
+    }
+
+    function setNotifyState(msg, isErr) {
+      const el = document.getElementById("notifyState");
+      if (!el) return;
+      const t = (msg || "").toString().trim();
+      if (!t) {
+        el.style.display = "none";
+        el.textContent = "";
+        return;
+      }
+      el.style.display = "block";
+      el.textContent = t;
+      el.style.color = isErr ? "#a00000" : "";
+    }
+
 
     function getInitialPlate() {
       try {
@@ -1306,12 +1346,22 @@ INDEX_HTML = r"""<!doctype html>
         const destText = data.destination_text || "-";
         const destLink = data.destination_nav_url ? `<a href="${data.destination_nav_url}" target="_blank" rel="noopener">${destText}</a>` : destText;
 
+        let placeInfoHtml = "";
+        const rawLoc = (data.location || "").toString().trim();
+        if (rawLoc) {
+          const tr = (data.trailer || "").toString().trim();
+          const place = formatPlace(rawLoc);
+          placeInfoHtml = `<div><b>Trailer:</b> ${tr || "-"}</div><div><b>Place:</b> ${place}</div>`;
+        }
+
+
         show(`
           <div class="status-big">"${data.status_text}"</div>
           <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
           <div><b>Destination:</b> ${destLink}</div>
           <div><b>Departure time:</b> ${data.scheduled_departure || "-"}</div>
           <div><b>Report in the office:</b> ${data.report_in_office_at || "-"}</div>
+          ${placeInfoHtml}
           <div class="muted" style="margin-top:8px;">Last refresh: ${last}</div>
 
           <div style="margin-top:12px;"><b>Route map:</b></div>
@@ -1324,9 +1374,13 @@ INDEX_HTML = r"""<!doctype html>
         if (data.push_enabled && data.vapid_public_key) {
           const bn = document.getElementById("btnNotify");
           bn.style.display = "block";
+          bn.disabled = false;
+          bn.textContent = "Enable notifications";
+          setNotifyState("", false);
           bn.onclick = () => enableNotifications(plate, loc, data.vapid_public_key);
         } else {
           document.getElementById("btnNotify").style.display = "none";
+          setNotifyState("", false);
         }
 
       } catch (e) {
@@ -1348,13 +1402,13 @@ INDEX_HTML = r"""<!doctype html>
     async function enableNotifications(plate, loc, vapidPublicKey) {
       try {
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-          show(`<b>Notifications not supported</b><div class="muted">Use Chrome/Edge on Android. iOS requires adding the site to Home Screen.</div>`, "warn");
+          setNotifyState("Notifications not supported. Use Chrome/Edge. On iOS add the site to Home Screen.", true);
           return;
         }
 
         const perm = await Notification.requestPermission();
         if (perm !== 'granted') {
-          show(`<b>Notifications denied</b><div class="muted">Allow notifications in browser settings.</div>`, "warn");
+          setNotifyState("Notifications denied. Allow notifications in browser settings.", true);
           return;
         }
 
@@ -1388,13 +1442,19 @@ INDEX_HTML = r"""<!doctype html>
 
         const data = await readJsonOrText(resp);
         if (!resp.ok) {
-          show(`<b>Subscribe failed:</b> ${data.detail || resp.statusText}`, "err");
+          setNotifyState("Subscribe failed: " + (data.detail || resp.statusText), true);
           return;
         }
 
-        show(`<b>Notifications enabled</b><div class="muted">You will receive a push when your status changes.</div>`, "ok");
+        setNotifyState("Notifications turned on.", false);
+
+        const bn = document.getElementById("btnNotify");
+        if (bn) {
+          bn.textContent = "Notifications ON";
+          bn.disabled = true;
+        }
       } catch (e) {
-        show(`<b>Subscribe error:</b> ${e}`, "err");
+        setNotifyState("Subscribe error: " + e, true);
       }
     }
 
