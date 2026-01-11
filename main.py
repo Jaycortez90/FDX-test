@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Query, Request, Body
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 try:
@@ -244,6 +244,32 @@ def _has(v: Any) -> bool:
     return bool(s) and s.lower() not in {"nan", "none", "nat"}
 
 
+def _is_departed_movement(m: Dict[str, Any]) -> bool:
+    """Return True if the movement should be treated as departed."""
+    try:
+        if m.get("departed") is True:
+            return True
+    except Exception:
+        pass
+
+    if _has(m.get("departed_at")):
+        return True
+
+    # Common fallback keys (desktop snapshots may use different naming)
+    for k in [
+        "Departed", "departed_time",
+        "actual_departure", "actual_departure_dt", "Actual departure date/time", "Actual departure date/time_ROCS",
+        "ATD", "atd",
+    ]:
+        try:
+            if _has(m.get(k)):
+                return True
+        except Exception:
+            continue
+
+    return False
+
+
 def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
     # Dispatcher manual status (Driver message) overrides computed status
     plate_n = ""
@@ -261,6 +287,10 @@ def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             key = "driver_message"
         return {"status_key": key, "status_text": msg, "report_in_office_at": ""}
+
+    # Departed status (shown to drivers)
+    if _is_departed_movement(m):
+        return {"status_key": "DEPARTED", "status_text": "Drive safe, we wait you back!", "report_in_office_at": ""}
 
     close_door = m.get("close_door", "")
     location = m.get("location", "")
@@ -492,7 +522,38 @@ def _get_plate_record(plate: str) -> Optional[Dict[str, Any]]:
         return matches[0]
     if len(matches) == 0:
         return None
-    raise HTTPException(status_code=409, detail="Multiple movements found for this plate. Contact the office.")
+
+    # If multiple records exist for a plate, pick the most relevant one for the driver:
+    #  - Prefer NOT departed
+    #  - Then prefer records with a Location
+    #  - Then prefer records with CloseDoor
+    #  - Then fall back to scheduled departure proximity (best-effort)
+    def _priority(rec: Dict[str, Any]) -> int:
+        dep = _is_departed_movement(rec)
+        loc = _has(rec.get("location", ""))
+        cd = _has(rec.get("close_door", ""))
+
+        score = 0
+        if loc:
+            score += 100
+        elif cd:
+            score += 80
+        else:
+            sched_dt = _parse_dt(rec.get("scheduled_departure", ""))
+            if sched_dt:
+                mins = (sched_dt - datetime.now()).total_seconds() / 60.0
+                if mins <= 45:
+                    score += 60
+                else:
+                    score += 40
+            else:
+                score += 30
+
+        if dep:
+            score -= 1000
+        return score
+
+    return max(matches, key=_priority)
 
 
 def _push_to_plate(plate: str, title: str, body: str) -> None:
@@ -996,6 +1057,22 @@ def sw() -> Response:
     return Response(content=SERVICE_WORKER_JS, media_type="application/javascript")
 
 
+
+
+@app.get("/favicon.ico")
+def favicon() -> Response:
+    # Preferred location: static/favicon.ico
+    # Fallback: static/app_icon_round.ico
+    cand = [
+        os.path.join(STATIC_DIR, "favicon.ico"),
+        os.path.join(STATIC_DIR, "app_icon_round.ico"),
+    ]
+    for p in cand:
+        if os.path.exists(p):
+            return FileResponse(p, media_type="image/x-icon")
+    return Response(status_code=404)
+
+
 @app.get("/")
 def index() -> HTMLResponse:
     return HTMLResponse(INDEX_HTML)
@@ -1010,6 +1087,7 @@ INDEX_HTML = r"""<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Driver Status</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     body {
