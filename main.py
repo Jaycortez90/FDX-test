@@ -277,6 +277,17 @@ def _format_dt_like(dt: datetime, sample: Any) -> str:
         return dt.strftime("%Y-%m-%d %H:%M")
 
 
+def _format_scheduled_departure(sched_raw: Any) -> str:
+    """Format scheduled_departure so it matches report_in_office_at style."""
+    dt = _parse_dt(sched_raw)
+    if dt:
+        return _format_dt_like(dt, sched_raw)
+    try:
+        return str(sched_raw or "").strip()
+    except Exception:
+        return ""
+
+
 def _has(v: Any) -> bool:
     s = str(v or "").strip()
     return bool(s) and s.lower() not in {"nan", "none", "nat"}
@@ -918,6 +929,9 @@ def get_status(
     dest_text, dlat, dlon = resolve_destination(rec)
     nav = destination_nav_url(dlat, dlon, dest_text)
 
+    sched_raw = rec.get("scheduled_departure") or ""
+    sched_disp = _format_scheduled_departure(sched_raw)
+
 
     # Mark that this plate was checked on the website (used by desktop for 👁 icon)
     try:
@@ -937,7 +951,7 @@ def get_status(
         "status_text": st["status_text"],
         "destination_text": dest_text,
         "destination_nav_url": nav,
-        "scheduled_departure": rec.get("scheduled_departure") or "",
+        "scheduled_departure": sched_disp,
         "report_in_office_at": st["report_in_office_at"],
         "trailer": rec.get("trailer") or "",
         "location": rec.get("location") or "",
