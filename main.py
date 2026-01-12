@@ -5,6 +5,7 @@ import time
 import math
 import urllib.parse
 import urllib.request
+import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -238,6 +239,43 @@ def _parse_dt(val: Any) -> Optional[datetime]:
 
     return None
 
+def _format_dt_like(dt: datetime, sample: Any) -> str:
+    """Format dt to match the date/time style of sample (scheduled_departure string)."""
+    try:
+        s = str(sample or "").strip()
+    except Exception:
+        s = ""
+
+    # Default (ISO-like)
+    date_fmt = "%Y-%m-%d"
+    sep = " "
+
+    # Preserve separator if sample uses 'T'
+    if "T" in s and " " not in s:
+        sep = "T"
+
+    # Pick date format based on sample
+    if re.search(r"\b\d{2}\.\d{2}\.\d{4}\b", s):
+        date_fmt = "%d.%m.%Y"
+    elif re.search(r"\b\d{2}/\d{2}/\d{4}\b", s):
+        date_fmt = "%d/%m/%Y"
+    elif re.search(r"\b\d{2}-\d{2}-\d{4}\b", s):
+        date_fmt = "%d-%m-%Y"
+    elif re.search(r"\b\d{4}/\d{2}/\d{2}\b", s):
+        date_fmt = "%Y/%m/%d"
+    elif re.search(r"\b\d{4}\.\d{2}\.\d{2}\b", s):
+        date_fmt = "%Y.%m.%d"
+    elif re.search(r"\b\d{4}-\d{2}-\d{2}\b", s):
+        date_fmt = "%Y-%m-%d"
+
+    has_seconds = bool(re.search(r":\d{2}:\d{2}(?!\d)", s))
+    time_fmt = "%H:%M:%S" if has_seconds else "%H:%M"
+
+    try:
+        return dt.strftime(f"{date_fmt}{sep}{time_fmt}")
+    except Exception:
+        return dt.strftime("%Y-%m-%d %H:%M")
+
 
 def _has(v: Any) -> bool:
     s = str(v or "").strip()
@@ -302,7 +340,7 @@ def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
     report_at = ""
     if sched_dt:
         ra = sched_dt - timedelta(minutes=45)
-        report_at = ra.strftime("%Y-%m-%d %H:%M")
+        report_at = _format_dt_like(ra, sched_raw)
 
     return {
         "status_key": key,
@@ -901,6 +939,8 @@ def get_status(
         "destination_nav_url": nav,
         "scheduled_departure": rec.get("scheduled_departure") or "",
         "report_in_office_at": st["report_in_office_at"],
+        "trailer": rec.get("trailer") or "",
+        "location": rec.get("location") or "",
         "last_refresh": (SNAPSHOT or {}).get("last_update"),
         "push_enabled": PUSH_ENABLED,
         "vapid_public_key": VAPID_PUBLIC_KEY if PUSH_ENABLED else "",
@@ -1315,12 +1355,45 @@ INDEX_HTML = r"""<!doctype html>
         const destText = data.destination_text || "-";
         const destLink = data.destination_nav_url ? `<a href="${data.destination_nav_url}" target="_blank" rel="noopener">${destText}</a>` : destText;
 
+        const trailerVal = (data.trailer || "").trim();
+        const locVal = (data.location || "").trim();
+
+        let extraTrailerPlace = "";
+        if (locVal) {
+          let placeText = locVal;
+
+          // If location begins with "P" → show "Parking <number>"
+          if (/^[Pp]/.test(locVal)) {
+            let rest = locVal.slice(1).trim();
+
+            // Prefer digits (e.g. "P12" / "P 012")
+            const digits = (rest.match(/\d+/g) || []).join("");
+            if (digits) {
+              const num = digits.replace(/^0+/, "") || "0";
+              placeText = `Parking ${num}`;
+            } else if (rest) {
+              placeText = `Parking ${rest}`;
+            } else {
+              placeText = "Parking";
+            }
+          }
+          // If location begins with a number → show "Dock <location>"
+          else if (/^\d/.test(locVal)) {
+            placeText = `Dock ${locVal}`;
+          }
+
+          extraTrailerPlace = `
+          <div style="margin-top:6px;"><b>Trailer:</b> ${trailerVal || "-"}</div>
+          <div><b>Place:</b> ${placeText}</div>`;
+        }
+
         show(`
           <div class="status-big">"${data.status_text}"</div>
           <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
           <div><b>Destination:</b> ${destLink}</div>
           <div><b>Departure time:</b> ${data.scheduled_departure || "-"}</div>
           <div><b>Report in the office:</b> ${data.report_in_office_at || "-"}</div>
+          ${extraTrailerPlace}
           <div class="muted" style="margin-top:8px;">Last refresh: ${last}</div>
 
           <div style="margin-top:12px;"><b>Route map:</b></div>
