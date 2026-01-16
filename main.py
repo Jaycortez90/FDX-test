@@ -1179,6 +1179,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="row" style="margin-top: 8px;">
         <button id="btnNotify" class="btn btn-secondary" style="display:none;">Enable notifications</button>
       </div>
+      <div id="notifyMsg" class="muted" style="margin-top:6px; display:none;"></div>
 
       <div id="out" class="card" style="display:none;"></div>
     </div>
@@ -1188,6 +1189,14 @@ INDEX_HTML = r"""<!doctype html>
 
   <script>
     const API_BASE = window.location.origin;
+
+    function setNotifyMsg(html, kind) {
+      const el = document.getElementById("notifyMsg");
+      if (!el) return;
+      el.style.display = html ? "block" : "none";
+      el.innerHTML = html || "";
+      el.style.color = (kind === "err") ? "#a00000" : "";
+    }
 
     function normalizePlate(v) {
       return (v || "").toUpperCase().trim().replaceAll(" ", "").replaceAll("-", "");
@@ -1351,6 +1360,7 @@ INDEX_HTML = r"""<!doctype html>
           destroyMap();
           show(`<b>Error:</b> ${data.detail || res.statusText}`, "err");
           document.getElementById("btnNotify").style.display = "none";
+          setNotifyMsg("", "");
           return;
         }
 
@@ -1363,6 +1373,7 @@ INDEX_HTML = r"""<!doctype html>
             <div class="muted">Last refresh: ${last}</div>
           `, "warn");
           document.getElementById("btnNotify").style.display = "none";
+          setNotifyMsg("", "");
           return;
         }
 
@@ -1421,14 +1432,20 @@ INDEX_HTML = r"""<!doctype html>
           const bn = document.getElementById("btnNotify");
           bn.style.display = "block";
           bn.onclick = () => enableNotifications(plate, loc, data.vapid_public_key);
+          bn.disabled = false;
+          bn.textContent = "Enable notifications";
+          bn.style.opacity = "";
+          setNotifyMsg("", "");
         } else {
           document.getElementById("btnNotify").style.display = "none";
+          setNotifyMsg("", "");
         }
 
       } catch (e) {
         destroyMap();
         show(`<b>Network error:</b> ${e}`, "err");
         document.getElementById("btnNotify").style.display = "none";
+        setNotifyMsg("", "");
       }
     }
 
@@ -1443,14 +1460,25 @@ INDEX_HTML = r"""<!doctype html>
 
     async function enableNotifications(plate, loc, vapidPublicKey) {
       try {
+        const bn0 = document.getElementById("btnNotify");
+        if (bn0) {
+          bn0.disabled = true;
+          bn0.textContent = "Enabling...";
+          bn0.style.opacity = "0.75";
+        }
+        setNotifyMsg("<div class=\"muted\">Enabling notifications…</div>", "");
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-          show(`<b>Notifications not supported</b><div class="muted">Use Chrome/Edge on Android. iOS requires adding the site to Home Screen.</div>`, "warn");
+          setNotifyMsg(`<b>Notifications not supported</b><div class="muted">Use Chrome/Edge on Android. iOS requires adding the site to Home Screen.</div>`, "err");
+          const bn1 = document.getElementById("btnNotify");
+          if (bn1) { bn1.disabled = false; bn1.textContent = "Enable notifications"; bn1.style.opacity = ""; }
           return;
         }
 
         const perm = await Notification.requestPermission();
         if (perm !== 'granted') {
-          show(`<b>Notifications denied</b><div class="muted">Allow notifications in browser settings.</div>`, "warn");
+          setNotifyMsg(`<b>Notifications denied</b><div class="muted">Allow notifications in browser settings.</div>`, "err");
+          const bn2 = document.getElementById("btnNotify");
+          if (bn2) { bn2.disabled = false; bn2.textContent = "Enable notifications"; bn2.style.opacity = ""; }
           return;
         }
 
@@ -1484,13 +1512,24 @@ INDEX_HTML = r"""<!doctype html>
 
         const data = await readJsonOrText(resp);
         if (!resp.ok) {
-          show(`<b>Subscribe failed:</b> ${data.detail || resp.statusText}`, "err");
+          setNotifyMsg(`<b>Subscribe failed:</b> ${data.detail || resp.statusText}`, "err");
+          const bn3 = document.getElementById("btnNotify");
+          if (bn3) { bn3.disabled = false; bn3.textContent = "Enable notifications"; bn3.style.opacity = ""; }
           return;
         }
 
-        show(`<b>Notifications enabled</b><div class="muted">You will receive a push when your status changes.</div>`, "ok");
+        const bn = document.getElementById("btnNotify");
+        if (bn) {
+          bn.disabled = true;
+          bn.textContent = "Notifications enabled";
+          bn.style.opacity = "0.75";
+          bn.onclick = null;
+        }
+        setNotifyMsg(`<b>Notifications enabled</b><div class="muted">You will receive a push when your status changes.</div>`, "");
       } catch (e) {
-        show(`<b>Subscribe error:</b> ${e}`, "err");
+        setNotifyMsg(`<b>Subscribe error:</b> ${e}`, "err");
+        const bn4 = document.getElementById("btnNotify");
+        if (bn4) { bn4.disabled = false; bn4.textContent = "Enable notifications"; bn4.style.opacity = ""; }
       }
     }
 
