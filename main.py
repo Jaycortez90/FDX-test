@@ -125,6 +125,16 @@ ORS_API_KEY = os.environ.get("ORS_API_KEY", "").strip()
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv/geojson"
 
 # =============================
+# Live Traffic (optional) - HERE Routing v8 (server-side)
+# =============================
+HERE_API_KEY = os.environ.get("HERE_API_KEY", "").strip()
+HERE_ROUTING_URL = "https://router.hereapi.com/v8/routes"
+
+# In-memory cache for traffic delay (Render restarts will clear these)
+_TRAFFIC_CACHE: Dict[Tuple[float, float, float, float, str], Tuple[float, Dict[str, Any]]] = {}
+_TRAFFIC_TTL_SEC = 90
+
+# =============================
 # Web Push (optional)
 # =============================
 VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
@@ -292,6 +302,78 @@ def _has(v: Any) -> bool:
     s = str(v or "").strip()
     return bool(s) and s.lower() not in {"nan", "none", "nat"}
 
+
+def _traffic_cache_get(key: Tuple[float, float, float, float, str]) -> Optional[Dict[str, Any]]:
+    item = _TRAFFIC_CACHE.get(key)
+    if not item:
+        return None
+    ts, payload = item
+    if (time.time() - float(ts)) > float(_TRAFFIC_TTL_SEC):
+        _TRAFFIC_CACHE.pop(key, None)
+        return None
+    return payload
+
+
+def _traffic_cache_set(key: Tuple[float, float, float, float, str], payload: Dict[str, Any]) -> None:
+    _TRAFFIC_CACHE[key] = (time.time(), payload)
+
+
+def _here_fetch_delay_minutes(
+    origin_lat: float,
+    origin_lon: float,
+    dest_lat: float,
+    dest_lon: float,
+    departure_iso: str = "",
+) -> Tuple[Optional[int], Optional[str]]:
+    """Return (delay_minutes, error). delay_minutes is >=0 on success."""
+    key = (HERE_API_KEY or "").strip()
+    if not key:
+        return None, "HERE_API_KEY missing on server"
+
+    params = {
+        "transportMode": "truck",
+        "origin": f"{origin_lat:.6f},{origin_lon:.6f}",
+        "destination": f"{dest_lat:.6f},{dest_lon:.6f}",
+        "return": "summary",
+        "apiKey": key,
+    }
+    if departure_iso:
+        params["departureTime"] = departure_iso
+
+    try:
+        qs = urllib.parse.urlencode(params)
+        url = f"{HERE_ROUTING_URL}?{qs}"
+        req = urllib.request.Request(
+            url,
+            headers={"Accept": "application/json", "User-Agent": "DriverStatus/TrafficDelay"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            raw = resp.read()
+
+        data = json.loads(raw.decode("utf-8", errors="ignore") or "{}")
+        routes = data.get("routes") or []
+        if not routes:
+            return None, "HERE: no routes"
+        sections = routes[0].get("sections") or []
+        if not sections:
+            return None, "HERE: no sections"
+        summary = sections[0].get("summary") or {}
+
+        base_sec = summary.get("baseDuration")
+        traffic_sec = summary.get("duration")
+        if base_sec is None or traffic_sec is None:
+            return None, "HERE: missing duration fields"
+
+        delay_sec = max(0, int(traffic_sec) - int(base_sec))
+        delay_min = int(round(delay_sec / 60.0))
+        if delay_min < 0:
+            delay_min = 0
+        return delay_min, None
+    except Exception as e:
+        # If the request is rejected, HERE often returns JSON with 'title'/'message',
+        # but urllib raises HTTPError; keep it simple.
+        return None, f"HERE request failed ({type(e).__name__})"
 
 def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
     # Dispatcher manual status (Driver message) overrides computed status
@@ -986,6 +1068,48 @@ def get_plate_flags(
         }
 
     return {"ok": True, "plates": out}
+
+
+
+@app.get("/api/traffic_delay")
+def traffic_delay(
+    secret: str = Query(..., min_length=8),
+    o: str = Query(..., description="origin as 'lat,lon'"),
+    d: str = Query(..., description="destination as 'lat,lon'"),
+    depart: str = Query("", description="optional ISO-8601 departure time"),
+) -> Dict[str, Any]:
+    """Return live-traffic delay minutes (server-side)."""
+    if not ADMIN_UPLOAD_SECRET:
+        raise HTTPException(status_code=500, detail="Server not configured: ADMIN_UPLOAD_SECRET missing.")
+    if secret != ADMIN_UPLOAD_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
+    try:
+        o_lat_s, o_lon_s = [x.strip() for x in (o or "").split(",", 1)]
+        d_lat_s, d_lon_s = [x.strip() for x in (d or "").split(",", 1)]
+        o_lat = float(o_lat_s)
+        o_lon = float(o_lon_s)
+        d_lat = float(d_lat_s)
+        d_lon = float(d_lon_s)
+    except Exception:
+        return {"ok": False, "error": "invalid o/d coords"}
+
+    depart_bucket = (depart or "").strip()[:16]  # minute bucket
+    cache_key = (round(o_lat, 4), round(o_lon, 4), round(d_lat, 4), round(d_lon, 4), depart_bucket)
+
+    cached = _traffic_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    delay_min, err = _here_fetch_delay_minutes(o_lat, o_lon, d_lat, d_lon, (depart or "").strip())
+    if err:
+        payload = {"ok": False, "error": err}
+        _traffic_cache_set(cache_key, payload)
+        return payload
+
+    payload = {"ok": True, "delay_min": int(delay_min or 0)}
+    _traffic_cache_set(cache_key, payload)
+    return payload
 
 
 @app.get("/api/route")
