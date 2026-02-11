@@ -303,6 +303,15 @@ def _has(v: Any) -> bool:
     return bool(s) and s.lower() not in {"nan", "none", "nat"}
 
 
+def _clean_location_value(v: Any) -> str:
+    s = str(v or "").strip()
+    if not s:
+        return ""
+    if s.lower() == "wait":
+        return ""
+    return s
+
+
 def _traffic_cache_get(key: Tuple[float, float, float, float, str]) -> Optional[Dict[str, Any]]:
     item = _TRAFFIC_CACHE.get(key)
     if not item:
@@ -403,7 +412,7 @@ def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
         return {"status_key": "DEPARTED", "status_text": "Drive safe, we wait you back!", "report_in_office_at": ""}
 
     close_door = m.get("close_door", "")
-    location = m.get("location", "")
+    location = _clean_location_value(m.get("location", ""))
     trailer = str(m.get("trailer", "") or "").strip()
     sched_raw = m.get("scheduled_departure", "")
 
@@ -1036,7 +1045,7 @@ def get_status(
         "scheduled_departure": sched_disp,
         "report_in_office_at": st["report_in_office_at"],
         "trailer": rec.get("trailer") or "",
-        "location": rec.get("location") or "",
+        "location": _clean_location_value(rec.get("location") or ""),
         "last_refresh": (SNAPSHOT or {}).get("last_update"),
         "push_enabled": PUSH_ENABLED,
         "vapid_public_key": VAPID_PUBLIC_KEY if PUSH_ENABLED else "",
@@ -1205,9 +1214,9 @@ INDEX_HTML = r"""<!doctype html>
       background-size: cover;
     }
     .wrap {
-      max-width: 720px;
+      width: min(860px, calc(100% - 24px));
       margin: 0 auto;
-      padding: 18px 16px 24px;
+      padding: 18px 0 24px;
     }
     .topcard {
       background: rgba(255,255,255,0.45);
@@ -1279,7 +1288,7 @@ INDEX_HTML = r"""<!doctype html>
     .err { border-color: #f5b5b5; }
 
     #map {
-      height: 320px;
+      height: clamp(240px, 42vh, 460px);
       width: 100%;
       border-radius: 12px;
       border: 1px solid rgba(0,0,0,0.18);
@@ -1287,7 +1296,14 @@ INDEX_HTML = r"""<!doctype html>
       background: rgba(255,255,255,0.35);
     }
 
-    a { color: inherit; }
+    
+
+    @media (max-width: 420px) {
+      .row { flex-direction: column; }
+      .row-main > button { flex: 0 0 auto; width: 100%; }
+      body { background-attachment: scroll; }
+    }
+a { color: inherit; }
   </style>
 </head>
 <body>
