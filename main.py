@@ -384,10 +384,10 @@ def _here_fetch_delay_minutes(
         # but urllib raises HTTPError; keep it simple.
         return None, f"HERE request failed ({type(e).__name__})"
 
-SUPPORTED_LANGS = {"en", "de", "nl", "ru"}
+SUPPORTED_LANGS = {"en", "de", "nl", "ru", "lt", "kk", "hi", "pl", "hu"}
 
 def normalize_lang(value: Any) -> str:
-    """Return one of: en, de, nl, ru."""
+    """Return one of: en, de, nl, ru, lt, kk, hi, pl, hu."""
     s = str(value or "").strip().lower()
     if not s:
         return "en"
@@ -405,6 +405,16 @@ def normalize_lang(value: Any) -> str:
         return "nl"
     if base in {"rus"}:
         return "ru"
+    if base in {"lit"}:
+        return "lt"
+    if base in {"kaz", "kz"}:
+        return "kk"
+    if base in {"hin"}:
+        return "hi"
+    if base in {"pol"}:
+        return "pl"
+    if base in {"hun"}:
+        return "hu"
     return "en"
 
 
@@ -441,6 +451,46 @@ _I18N_STATUS: Dict[str, Dict[str, str]] = {
         "LOADING_WAIT": "Ваш прицеп загружается — пожалуйста, подождите!",
         "REPORT_OFFICE": "Пожалуйста, подойдите в офис!",
     },
+    "lt": {
+        "DEPARTED": "Saugios kelionės – laukiame jūsų sugrįžtant!",
+        "LOCATION_WITH_TRAILER": "Prašome prijungti priekabą {trailer} vietoje: {location} ir pasiimti CMR dokumentus biure!",
+        "LOCATION_NO_TRAILER": "Prašome prijungti priekabą vietoje: {location} ir pasiimti CMR dokumentus biure!",
+        "CLOSEDOOR_NO_LOCATION": "Jūsų priekaba paruošta. Prašome užsukti į biurą dėl tolimesnės informacijos!",
+        "LOADING_WAIT": "Jūsų priekaba kraunama – prašome palaukti!",
+        "REPORT_OFFICE": "Prašome užsukti į biurą!",
+    },
+    "kk": {
+        "DEPARTED": "Сәтті жол — сізді қайта күтеміз!",
+        "LOCATION_WITH_TRAILER": "{location} орнында {trailer} тіркемесін қосып, CMR құжаттарын кеңседен алыңыз!",
+        "LOCATION_NO_TRAILER": "{location} орнында тіркемені қосып, CMR құжаттарын кеңседен алыңыз!",
+        "CLOSEDOOR_NO_LOCATION": "Тіркеме дайын. Қосымша ақпарат үшін кеңсеге келіңіз!",
+        "LOADING_WAIT": "Тіркеме тиелуде — күтіңіз!",
+        "REPORT_OFFICE": "Кеңсеге келіңіз!",
+    },
+    "hi": {
+        "DEPARTED": "सुरक्षित यात्रा करें — हम आपका वापस इंतज़ार करेंगे!",
+        "LOCATION_WITH_TRAILER": "कृपया {location} स्थान पर ट्रेलर {trailer} जोड़ें और CMR दस्तावेज़ कार्यालय से लें!",
+        "LOCATION_NO_TRAILER": "कृपया {location} स्थान पर ट्रेलर जोड़ें और CMR दस्तावेज़ कार्यालय से लें!",
+        "CLOSEDOOR_NO_LOCATION": "आपका ट्रेलर तैयार है। आगे की जानकारी के लिए कृपया कार्यालय में रिपोर्ट करें!",
+        "LOADING_WAIT": "आपका ट्रेलर लोड हो रहा है — कृपया प्रतीक्षा करें!",
+        "REPORT_OFFICE": "कृपया कार्यालय में रिपोर्ट करें!",
+    },
+    "pl": {
+        "DEPARTED": "Szerokiej drogi — czekamy na Twój powrót!",
+        "LOCATION_WITH_TRAILER": "Proszę podpiąć naczepę {trailer} na lokalizacji: {location} i odebrać dokumenty CMR w biurze!",
+        "LOCATION_NO_TRAILER": "Proszę podpiąć naczepę na lokalizacji: {location} i odebrać dokumenty CMR w biurze!",
+        "CLOSEDOOR_NO_LOCATION": "Twoja naczepa jest gotowa. Proszę zgłosić się do biura po dalsze informacje!",
+        "LOADING_WAIT": "Twoja naczepa jest ładowana — proszę czekać!",
+        "REPORT_OFFICE": "Proszę zgłosić się do biura!",
+    },
+    "hu": {
+        "DEPARTED": "Vezess óvatosan – várunk vissza!",
+        "LOCATION_WITH_TRAILER": "Kérjük, csatlakoztasd a(z) {trailer} pótkocsit a következő helyen: {location}, és vedd fel a CMR dokumentumokat az irodában!",
+        "LOCATION_NO_TRAILER": "Kérjük, csatlakoztasd a pótkocsit a következő helyen: {location}, és vedd fel a CMR dokumentumokat az irodában!",
+        "CLOSEDOOR_NO_LOCATION": "A pótkocsid kész. További információért jelentkezz az irodában!",
+        "LOADING_WAIT": "A pótkocsid rakodás alatt – kérjük, várj!",
+        "REPORT_OFFICE": "Kérjük, jelentkezz az irodában!",
+    },
 }
 
 _I18N_PUSH_TITLES: Dict[str, Dict[str, str]] = {
@@ -448,6 +498,11 @@ _I18N_PUSH_TITLES: Dict[str, Dict[str, str]] = {
     "de": {"STATUS_UPDATE": "Status-Update", "MESSAGE_FROM_DISPATCH": "Nachricht von der Disposition"},
     "nl": {"STATUS_UPDATE": "Statusupdate", "MESSAGE_FROM_DISPATCH": "Bericht van de planning"},
     "ru": {"STATUS_UPDATE": "Обновление статуса", "MESSAGE_FROM_DISPATCH": "Сообщение от диспетчера"},
+    "lt": {"STATUS_UPDATE": "Būsenos atnaujinimas", "MESSAGE_FROM_DISPATCH": "Žinutė iš dispečerio"},
+    "kk": {"STATUS_UPDATE": "Күй жаңартуы", "MESSAGE_FROM_DISPATCH": "Диспетчерден хабарлама"},
+    "hi": {"STATUS_UPDATE": "स्थिति अपडेट", "MESSAGE_FROM_DISPATCH": "डिस्पैच से संदेश"},
+    "pl": {"STATUS_UPDATE": "Aktualizacja statusu", "MESSAGE_FROM_DISPATCH": "Wiadomość od dyspozytora"},
+    "hu": {"STATUS_UPDATE": "Státusz frissítés", "MESSAGE_FROM_DISPATCH": "Üzenet a diszpécsertől"},
 }
 
 _I18N_ROUTE_NOTE: Dict[str, Dict[str, str]] = {
@@ -455,6 +510,11 @@ _I18N_ROUTE_NOTE: Dict[str, Dict[str, str]] = {
     "de": {"ORS": "Routenquelle: OpenRouteService", "OSRM": "Routenquelle: OSRM", "DIRECT": "Routenquelle: direkte Linie"},
     "nl": {"ORS": "Routebron: OpenRouteService", "OSRM": "Routebron: OSRM", "DIRECT": "Routebron: rechte lijn"},
     "ru": {"ORS": "Источник маршрута: OpenRouteService", "OSRM": "Источник маршрута: OSRM", "DIRECT": "Источник маршрута: прямая линия"},
+    "lt": {"ORS": "Maršruto šaltinis: OpenRouteService", "OSRM": "Maršruto šaltinis: OSRM", "DIRECT": "Maršruto šaltinis: tiesi linija"},
+    "kk": {"ORS": "Маршрут көзі: OpenRouteService", "OSRM": "Маршрут көзі: OSRM", "DIRECT": "Маршрут көзі: түзу сызық"},
+    "hi": {"ORS": "मार्ग स्रोत: OpenRouteService", "OSRM": "मार्ग स्रोत: OSRM", "DIRECT": "मार्ग स्रोत: सीधी रेखा"},
+    "pl": {"ORS": "Źródło trasy: OpenRouteService", "OSRM": "Źródło trasy: OSRM", "DIRECT": "Źródło trasy: linia prosta"},
+    "hu": {"ORS": "Útvonal forrása: OpenRouteService", "OSRM": "Útvonal forrása: OSRM", "DIRECT": "Útvonal forrása: egyenes vonal"},
 }
 
 def route_note_text(route_key: str, lang: str = "en") -> str:
@@ -1482,12 +1542,16 @@ INDEX_HTML = r"""<!doctype html>
   <div class="wrap">
     <div class="topcard">
       <h2 id="titleH2" style="margin: 6px 0 6px;">Movement status by license plate</h2>
-
       <div class="langbar" id="langbar" aria-label="Language">
         <button class="flagbtn" data-lang="en" title="English" aria-label="English">🇬🇧</button>
         <button class="flagbtn" data-lang="de" title="Deutsch" aria-label="Deutsch">🇩🇪</button>
         <button class="flagbtn" data-lang="nl" title="Nederlands" aria-label="Nederlands">🇳🇱</button>
         <button class="flagbtn" data-lang="ru" title="Русский" aria-label="Русский">🇷🇺</button>
+        <button class="flagbtn" data-lang="lt" title="Lietuvių" aria-label="Lietuvių">🇱🇹</button>
+        <button class="flagbtn" data-lang="kk" title="Қазақша" aria-label="Қазақша">🇰🇿</button>
+        <button class="flagbtn" data-lang="hi" title="हिन्दी" aria-label="हिन्दी">🇮🇳</button>
+        <button class="flagbtn" data-lang="pl" title="Polski" aria-label="Polski">🇵🇱</button>
+        <button class="flagbtn" data-lang="hu" title="Magyar" aria-label="Magyar">🇭🇺</button>
       </div>
 
       <div class="row row-main">
@@ -1507,10 +1571,7 @@ INDEX_HTML = r"""<!doctype html>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    const API_BASE = window.location.origin;
-
-    const SUPPORTED_LANGS = ["en", "de", "nl", "ru"];
-
+    const API_BASE = window.location.origin;    const SUPPORTED_LANGS = ["en", "de", "nl", "ru", "lt", "kk", "hi", "pl", "hu"];
     const UI = {
       en: {
         title: "Movement status by license plate",
@@ -1675,14 +1736,222 @@ INDEX_HTML = r"""<!doctype html>
         notify_enabled_help: "Вы получите push, когда статус изменится.",
         subscribe_error: "Ошибка подписки",
         route_error: "Ошибка маршрута"
+      },
+      lt: {
+        title: "Judėjimo būsena pagal valstybinį numerį",
+        plate_ph: "Įveskite numerį (pvz. AB-123-CD)",
+        btn_check: "Tikrinti",
+        btn_notify: "Įjungti pranešimus",
+        btn_enabling: "Įjungiama…",
+        btn_enabled: "Pranešimai įjungti",
+
+        getting_location: "Gaunama vieta…",
+        loading_status: "Įkeliama būsena…",
+        loading_route: "Įkeliama trasa…",
+
+        no_movement: "Judėjimas nerastas",
+        last_refresh: "Paskutinis atnaujinimas",
+        destination: "Paskirtis",
+        departure_time: "Išvykimo laikas",
+        report_office: "Atsižymėti biure",
+        trailer: "Priekaba",
+        place: "Vieta",
+        route_map: "Maršruto žemėlapis",
+        origin: "Pradžia",
+        destination_pin: "Paskirtis",
+
+        parking: "Parkingas",
+        dock: "Dokas",
+
+        err_location: "Vietos klaida",
+        err_network: "Tinklo klaida",
+        err_error: "Klaida",
+        help_location: "Įjunkite GPS ir leiskite vietos leidimą.",
+
+        notify_not_supported: "Pranešimai nepalaikomi",
+        notify_not_supported_help: "Naudokite Chrome/Edge Android. iOS reikalauja pridėti svetainę į pagrindinį ekraną.",
+        notify_denied: "Pranešimai atmesti",
+        notify_denied_help: "Leiskite pranešimus naršyklės nustatymuose.",
+        notify_failed: "Prenumerata nepavyko",
+        notify_enabled_msg: "Pranešimai įjungti",
+        notify_enabled_help: "Gausite push pranešimą, kai pasikeis būsena.",
+        subscribe_error: "Prenumeratos klaida",
+        route_error: "Maršruto klaida"
+      },
+      kk: {
+        title: "Көлік нөмірі бойынша қозғалыс күйі",
+        plate_ph: "Нөмірді енгізіңіз (мысалы AB-123-CD)",
+        btn_check: "Тексеру",
+        btn_notify: "Хабарландыруларды қосу",
+        btn_enabling: "Қосылуда…",
+        btn_enabled: "Хабарландырулар қосулы",
+
+        getting_location: "Орналасу анықталуда…",
+        loading_status: "Күй жүктелуде…",
+        loading_route: "Маршрут жүктелуде…",
+
+        no_movement: "Қозғалыс табылмады",
+        last_refresh: "Соңғы жаңарту",
+        destination: "Бағыт",
+        departure_time: "Жөнелу уақыты",
+        report_office: "Кеңсеге келу",
+        trailer: "Тіркеме",
+        place: "Орын",
+        route_map: "Маршрут картасы",
+        origin: "Бастау",
+        destination_pin: "Бағыт",
+
+        parking: "Тұрақ",
+        dock: "Док",
+
+        err_location: "Орналасу қатесі",
+        err_network: "Желі қатесі",
+        err_error: "Қате",
+        help_location: "GPS-ті қосыңыз және геолокацияға рұқсат беріңіз.",
+
+        notify_not_supported: "Хабарландырулар қолдау көрсетілмейді",
+        notify_not_supported_help: "Android-та Chrome/Edge қолданыңыз. iOS-та сайтты Home Screen-ге қосу керек.",
+        notify_denied: "Хабарландыруларға тыйым салынған",
+        notify_denied_help: "Браузер баптауларында хабарландыруларды рұқсат етіңіз.",
+        notify_failed: "Жазылу сәтсіз",
+        notify_enabled_msg: "Хабарландырулар қосылды",
+        notify_enabled_help: "Күй өзгерсе, push хабарлама аласыз.",
+        subscribe_error: "Жазылу қатесі",
+        route_error: "Маршрут қатесі"
+      },
+      hi: {
+        title: "लाइसेंस प्लेट के अनुसार मूवमेंट स्टेटस",
+        plate_ph: "लाइसेंस प्लेट दर्ज करें (जैसे AB-123-CD)",
+        btn_check: "जाँचें",
+        btn_notify: "सूचनाएँ सक्षम करें",
+        btn_enabling: "सक्षम किया जा रहा है…",
+        btn_enabled: "सूचनाएँ सक्षम",
+
+        getting_location: "लोकेशन प्राप्त की जा रही है…",
+        loading_status: "स्टेटस लोड हो रहा है…",
+        loading_route: "रूट लोड हो रहा है…",
+
+        no_movement: "कोई मूवमेंट नहीं मिला",
+        last_refresh: "अंतिम अपडेट",
+        destination: "गंतव्य",
+        departure_time: "प्रस्थान समय",
+        report_office: "ऑफिस में रिपोर्ट करें",
+        trailer: "ट्रेलर",
+        place: "स्थान",
+        route_map: "रूट मैप",
+        origin: "प्रारंभ",
+        destination_pin: "गंतव्य",
+
+        parking: "पार्किंग",
+        dock: "डॉक",
+
+        err_location: "लोकेशन त्रुटि",
+        err_network: "नेटवर्क त्रुटि",
+        err_error: "त्रुटि",
+        help_location: "GPS चालू करें और लोकेशन अनुमति दें।",
+
+        notify_not_supported: "सूचनाएँ समर्थित नहीं हैं",
+        notify_not_supported_help: "Android पर Chrome/Edge उपयोग करें। iOS के लिए साइट को Home Screen पर जोड़ना आवश्यक है।",
+        notify_denied: "सूचनाएँ अस्वीकृत",
+        notify_denied_help: "ब्राउज़र सेटिंग्स में सूचनाएँ अनुमति दें।",
+        notify_failed: "सब्सक्राइब विफल",
+        notify_enabled_msg: "सूचनाएँ सक्षम",
+        notify_enabled_help: "स्टेटस बदलने पर आपको push सूचना मिलेगी।",
+        subscribe_error: "सब्सक्राइब त्रुटि",
+        route_error: "रूट त्रुटि"
+      },
+      pl: {
+        title: "Status ruchu według tablicy rejestracyjnej",
+        plate_ph: "Wpisz rejestrację (np. AB-123-CD)",
+        btn_check: "Sprawdź",
+        btn_notify: "Włącz powiadomienia",
+        btn_enabling: "Włączanie…",
+        btn_enabled: "Powiadomienia włączone",
+
+        getting_location: "Pobieranie lokalizacji…",
+        loading_status: "Ładowanie statusu…",
+        loading_route: "Ładowanie trasy…",
+
+        no_movement: "Nie znaleziono ruchu",
+        last_refresh: "Ostatnie odświeżenie",
+        destination: "Cel",
+        departure_time: "Czas odjazdu",
+        report_office: "Zgłoś się do biura",
+        trailer: "Naczepa",
+        place: "Miejsce",
+        route_map: "Mapa trasy",
+        origin: "Start",
+        destination_pin: "Cel",
+
+        parking: "Parking",
+        dock: "Dok",
+
+        err_location: "Błąd lokalizacji",
+        err_network: "Błąd sieci",
+        err_error: "Błąd",
+        help_location: "Włącz GPS i zezwól na dostęp do lokalizacji.",
+
+        notify_not_supported: "Powiadomienia nieobsługiwane",
+        notify_not_supported_help: "Użyj Chrome/Edge na Androidzie. iOS wymaga dodania strony do ekranu początkowego.",
+        notify_denied: "Powiadomienia odrzucone",
+        notify_denied_help: "Zezwól na powiadomienia w ustawieniach przeglądarki.",
+        notify_failed: "Subskrypcja nie powiodła się",
+        notify_enabled_msg: "Powiadomienia włączone",
+        notify_enabled_help: "Otrzymasz push, gdy status się zmieni.",
+        subscribe_error: "Błąd subskrypcji",
+        route_error: "Błąd trasy"
+      },
+      hu: {
+        title: "Mozgás státusz rendszám alapján",
+        plate_ph: "Add meg a rendszámot (pl. AB-123-CD)",
+        btn_check: "Ellenőrzés",
+        btn_notify: "Értesítések bekapcsolása",
+        btn_enabling: "Bekapcsolás…",
+        btn_enabled: "Értesítések bekapcsolva",
+
+        getting_location: "Helyzet lekérése…",
+        loading_status: "Státusz betöltése…",
+        loading_route: "Útvonal betöltése…",
+
+        no_movement: "Nincs találat",
+        last_refresh: "Utolsó frissítés",
+        destination: "Célállomás",
+        departure_time: "Indulási idő",
+        report_office: "Jelentkezz az irodában",
+        trailer: "Pótkocsi",
+        place: "Hely",
+        route_map: "Útvonal térkép",
+        origin: "Kiindulás",
+        destination_pin: "Cél",
+
+        parking: "Parkoló",
+        dock: "Dokk",
+
+        err_location: "Helymeghatározási hiba",
+        err_network: "Hálózati hiba",
+        err_error: "Hiba",
+        help_location: "Kapcsold be a GPS-t és engedélyezd a helyhozzáférést.",
+
+        notify_not_supported: "Értesítések nem támogatottak",
+        notify_not_supported_help: "Androidon Chrome/Edge ajánlott. iOS-en add a weboldalt a Főképernyőhöz.",
+        notify_denied: "Értesítések letiltva",
+        notify_denied_help: "Engedélyezd az értesítéseket a böngésző beállításaiban.",
+        notify_failed: "Feliratkozás sikertelen",
+        notify_enabled_msg: "Értesítések bekapcsolva",
+        notify_enabled_help: "Push értesítést kapsz, ha a státusz változik.",
+        subscribe_error: "Feliratkozási hiba",
+        route_error: "Útvonal hiba"
       }
     };
+
 
     function normLang(v) {
       try {
         const s0 = String(v || "").trim().toLowerCase().replaceAll("_", "-");
         const base = s0.split("-", 1)[0];
         if (SUPPORTED_LANGS.includes(base)) return base;
+        // common aliases
+        if (base === "kz" || base === "kaz") return "kk";
         return "en";
       } catch (e) {
         return "en";
