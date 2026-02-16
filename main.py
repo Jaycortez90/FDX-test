@@ -182,7 +182,7 @@ async def _startup():
                             continue
                         if new_key != old_key:
                             LAST_STATUS_KEY_BY_PLATE[plate] = new_key
-                            _push_to_plate(plate, "Status update", st["status_text"])
+                            _push_status_change_to_plate(plate, m)
             except Exception:
                 pass
             await asyncio.sleep(STATUS_POLL_INTERVAL_SECONDS)
@@ -384,7 +384,98 @@ def _here_fetch_delay_minutes(
         # but urllib raises HTTPError; keep it simple.
         return None, f"HERE request failed ({type(e).__name__})"
 
-def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
+SUPPORTED_LANGS = {"en", "de", "nl", "ru"}
+
+def normalize_lang(value: Any) -> str:
+    """Return one of: en, de, nl, ru."""
+    s = str(value or "").strip().lower()
+    if not s:
+        return "en"
+    # normalize common forms: en-US, de_DE, etc.
+    s = s.replace("_", "-")
+    base = s.split("-", 1)[0]
+    if base in SUPPORTED_LANGS:
+        return base
+    # allow common aliases
+    if base in {"eng"}:
+        return "en"
+    if base in {"ger", "deu"}:
+        return "de"
+    if base in {"dut", "nld"}:
+        return "nl"
+    if base in {"rus"}:
+        return "ru"
+    return "en"
+
+
+_I18N_STATUS: Dict[str, Dict[str, str]] = {
+    "en": {
+        "DEPARTED": "Drive safe, we wait you back!",
+        "LOCATION_WITH_TRAILER": "Please connect the {trailer} trailer on location: {location} and pick up the CMR documents in the office!",
+        "LOCATION_NO_TRAILER": "Please connect the trailer on location: {location} and pick up the CMR documents in the office!",
+        "CLOSEDOOR_NO_LOCATION": "Your trailer is ready, please report in the office for further information!",
+        "LOADING_WAIT": "Your trailer is being loaded, please wait!",
+        "REPORT_OFFICE": "Please report in the office!",
+    },
+    "de": {
+        "DEPARTED": "Fahren Sie vorsichtig – wir erwarten Sie zurück!",
+        "LOCATION_WITH_TRAILER": "Bitte koppeln Sie den Anhänger {trailer} am Standort: {location} an und holen Sie die CMR-Dokumente im Büro ab!",
+        "LOCATION_NO_TRAILER": "Bitte koppeln Sie den Anhänger am Standort: {location} an und holen Sie die CMR-Dokumente im Büro ab!",
+        "CLOSEDOOR_NO_LOCATION": "Ihr Anhänger ist fertig. Bitte melden Sie sich im Büro für weitere Informationen!",
+        "LOADING_WAIT": "Ihr Anhänger wird beladen – bitte warten!",
+        "REPORT_OFFICE": "Bitte melden Sie sich im Büro!",
+    },
+    "nl": {
+        "DEPARTED": "Rij veilig – we wachten op je terugkeer!",
+        "LOCATION_WITH_TRAILER": "Koppel de trailer {trailer} op locatie: {location} en haal de CMR-documenten op in het kantoor!",
+        "LOCATION_NO_TRAILER": "Koppel de trailer op locatie: {location} en haal de CMR-documenten op in het kantoor!",
+        "CLOSEDOOR_NO_LOCATION": "Je trailer is gereed. Meld je in het kantoor voor verdere informatie!",
+        "LOADING_WAIT": "Je trailer wordt geladen – even wachten!",
+        "REPORT_OFFICE": "Meld je in het kantoor!",
+    },
+    "ru": {
+        "DEPARTED": "Счастливого пути — ждём вас обратно!",
+        "LOCATION_WITH_TRAILER": "Пожалуйста, прицепите прицеп {trailer} на месте: {location} и заберите документы CMR в офисе!",
+        "LOCATION_NO_TRAILER": "Пожалуйста, прицепите прицеп на месте: {location} и заберите документы CMR в офисе!",
+        "CLOSEDOOR_NO_LOCATION": "Ваш прицеп готов. Пожалуйста, подойдите в офис за дальнейшей информацией!",
+        "LOADING_WAIT": "Ваш прицеп загружается — пожалуйста, подождите!",
+        "REPORT_OFFICE": "Пожалуйста, подойдите в офис!",
+    },
+}
+
+_I18N_PUSH_TITLES: Dict[str, Dict[str, str]] = {
+    "en": {"STATUS_UPDATE": "Status update", "MESSAGE_FROM_DISPATCH": "Message from dispatch"},
+    "de": {"STATUS_UPDATE": "Status-Update", "MESSAGE_FROM_DISPATCH": "Nachricht von der Disposition"},
+    "nl": {"STATUS_UPDATE": "Statusupdate", "MESSAGE_FROM_DISPATCH": "Bericht van de planning"},
+    "ru": {"STATUS_UPDATE": "Обновление статуса", "MESSAGE_FROM_DISPATCH": "Сообщение от диспетчера"},
+}
+
+_I18N_ROUTE_NOTE: Dict[str, Dict[str, str]] = {
+    "en": {"ORS": "Route source: OpenRouteService", "OSRM": "Route source: OSRM", "DIRECT": "Route source: direct line"},
+    "de": {"ORS": "Routenquelle: OpenRouteService", "OSRM": "Routenquelle: OSRM", "DIRECT": "Routenquelle: direkte Linie"},
+    "nl": {"ORS": "Routebron: OpenRouteService", "OSRM": "Routebron: OSRM", "DIRECT": "Routebron: rechte lijn"},
+    "ru": {"ORS": "Источник маршрута: OpenRouteService", "OSRM": "Источник маршрута: OSRM", "DIRECT": "Источник маршрута: прямая линия"},
+}
+
+def route_note_text(route_key: str, lang: str = "en") -> str:
+    l = normalize_lang(lang)
+    rk = str(route_key or "").strip().upper()
+    table = _I18N_ROUTE_NOTE.get(l) or _I18N_ROUTE_NOTE["en"]
+    return table.get(rk, _I18N_ROUTE_NOTE["en"].get(rk, ""))
+
+
+def push_title_text(title_key: str, lang: str = "en") -> str:
+    l = normalize_lang(lang)
+    tk = str(title_key or "").strip().upper()
+    table = _I18N_PUSH_TITLES.get(l) or _I18N_PUSH_TITLES["en"]
+    return table.get(tk, _I18N_PUSH_TITLES["en"].get(tk, ""))
+
+
+def compute_driver_status(m: Dict[str, Any], lang: str = "en") -> Dict[str, Any]:
+    """Compute driver-facing status with localization."""
+    lang_n = normalize_lang(lang)
+    tmpl = _I18N_STATUS.get(lang_n) or _I18N_STATUS["en"]
+
     # Dispatcher manual status (Driver message) overrides computed status
     plate_n = ""
     try:
@@ -400,6 +491,7 @@ def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
             key = "driver_message:" + hashlib.sha1(msg.encode("utf-8", "ignore")).hexdigest()[:12]
         except Exception:
             key = "driver_message"
+        # Manual message is NOT translated (dispatcher text)
         return {"status_key": key, "status_text": msg, "report_in_office_at": ""}
 
     # Departed override (after manual status)
@@ -409,7 +501,7 @@ def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
     if not departed:
         departed = _has(m.get("departed_at", ""))
     if departed:
-        return {"status_key": "DEPARTED", "status_text": "Drive safe, we wait you back!", "report_in_office_at": ""}
+        return {"status_key": "DEPARTED", "status_text": tmpl["DEPARTED"], "report_in_office_at": ""}
 
     close_door = m.get("close_door", "")
     location = _clean_location_value(m.get("location", ""))
@@ -420,24 +512,24 @@ def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
 
     if _has(location):
         if trailer:
-            msg = f"Please connect the {trailer} trailer on location: {location} and pick up the CMR documents in the office!"
+            msg2 = tmpl["LOCATION_WITH_TRAILER"].format(trailer=trailer, location=location)
         else:
-            msg = f"Please connect the trailer on location: {location} and pick up the CMR documents in the office!"
-        key = "LOCATION"
+            msg2 = tmpl["LOCATION_NO_TRAILER"].format(location=location)
+        key2 = "LOCATION"
     elif _has(close_door):
-        msg = "Your trailer is ready, please report in the office for further information!"
-        key = "CLOSEDOOR_NO_LOCATION"
+        msg2 = tmpl["CLOSEDOOR_NO_LOCATION"]
+        key2 = "CLOSEDOOR_NO_LOCATION"
     else:
         minutes_left = None
         if sched_dt:
             minutes_left = (sched_dt - datetime.now()).total_seconds() / 60.0
 
         if minutes_left is not None and minutes_left > 45:
-            msg = "Your trailer being loaded, please wait!"
-            key = "LOADING_WAIT"
+            msg2 = tmpl["LOADING_WAIT"]
+            key2 = "LOADING_WAIT"
         else:
-            msg = "Please report in the office!"
-            key = "REPORT_OFFICE"
+            msg2 = tmpl["REPORT_OFFICE"]
+            key2 = "REPORT_OFFICE"
 
     report_at = ""
     if sched_dt:
@@ -445,8 +537,8 @@ def compute_driver_status(m: Dict[str, Any]) -> Dict[str, Any]:
         report_at = _format_dt_like(ra, sched_raw)
 
     return {
-        "status_key": key,
-        "status_text": msg,
+        "status_key": key2,
+        "status_text": msg2,
         "report_in_office_at": report_at,
     }
 
@@ -590,10 +682,20 @@ def build_route_points(
     dest_lat: float,
     dest_lon: float,
 ) -> Tuple[List[List[float]], str]:
-    """Return polyline as [[lat, lon], ...] and a short note."""
+    """Return polyline as [[lat, lon], ...] and a short route-source key."""
     pts = _fetch_ors_route_coords(origin_lat, origin_lon, dest_lat, dest_lon)
     if pts:
-        return [[lat, lon] for (lat, lon) in pts], "Route source: OpenRouteService"
+        return [[lat, lon] for (lat, lon) in pts], "ORS"
+
+    pts2 = _fetch_osrm_route_coords(origin_lat, origin_lon, dest_lat, dest_lon)
+    if pts2:
+        return [[lat, lon] for (lat, lon) in pts2], "OSRM"
+
+    return [
+        [float(origin_lat), float(origin_lon)],
+        [float(dest_lat), float(dest_lon)],
+    ], "DIRECT"
+
 
     pts2 = _fetch_osrm_route_coords(origin_lat, origin_lon, dest_lat, dest_lon)
     if pts2:
@@ -644,7 +746,8 @@ def _get_plate_record(plate: str) -> Optional[Dict[str, Any]]:
     raise HTTPException(status_code=409, detail="Multiple movements found for this plate. Contact the office.")
 
 
-def _push_to_plate(plate: str, title: str, body: str) -> None:
+def _push_to_plate_localized(plate: str, title_key: str, body_by_lang: Dict[str, str]) -> None:
+    """Send localized push to each subscription (best-effort)."""
     if not PUSH_ENABLED:
         return
     subs = SUBSCRIPTIONS_BY_PLATE.get(plate, []) or []
@@ -652,11 +755,20 @@ def _push_to_plate(plate: str, title: str, body: str) -> None:
         return
 
     vapid_claims = {"sub": VAPID_SUBJECT}
-    payload = json.dumps({"title": title, "body": body, "url": f"/?plate={urllib.parse.quote(plate)}"})
-
     alive = []
+
     for sub in subs:
         try:
+            lang = normalize_lang((sub or {}).get("lang", "en"))
+            title = push_title_text(title_key, lang)
+            body = body_by_lang.get(lang) or body_by_lang.get("en") or ""
+
+            payload = json.dumps({
+                "title": title,
+                "body": body,
+                "url": f"/?plate={urllib.parse.quote(plate)}&lang={urllib.parse.quote(lang)}",
+            })
+
             webpush(
                 subscription_info=sub,
                 data=payload,
@@ -665,9 +777,30 @@ def _push_to_plate(plate: str, title: str, body: str) -> None:
             )
             alive.append(sub)
         except Exception:
+            # Drop dead subscriptions
             pass
 
     SUBSCRIPTIONS_BY_PLATE[plate] = alive
+
+
+def _push_status_change_to_plate(plate: str, movement: Dict[str, Any]) -> None:
+    """Push a status update to a plate, in each subscriber's language."""
+    try:
+        bodies: Dict[str, str] = {}
+        for l in SUPPORTED_LANGS:
+            bodies[l] = compute_driver_status(movement, lang=l).get("status_text", "")
+        _push_to_plate_localized(plate, "STATUS_UPDATE", bodies)
+    except Exception:
+        return
+
+
+def _push_driver_message_to_plate(plate: str, message: str) -> None:
+    """Push dispatcher message to a plate (message text is not translated)."""
+    try:
+        bodies = {l: str(message or "") for l in SUPPORTED_LANGS}
+        _push_to_plate_localized(plate, "MESSAGE_FROM_DISPATCH", bodies)
+    except Exception:
+        return
 
 
 # -----------------------------
@@ -951,7 +1084,7 @@ async def upload_snapshot(request: Request, secret: str = Query(..., min_length=
                     continue
                 if new_key != old_key:
                     LAST_STATUS_KEY_BY_PLATE[plate] = new_key
-                    _push_to_plate(plate, "Status update", st["status_text"])
+                    _push_status_change_to_plate(plate, m)
         except Exception:
             pass
 
@@ -992,7 +1125,7 @@ async def driver_message(request: Request, secret: str = Query(..., min_length=8
     except Exception:
         pass
 
-    _push_to_plate(plate, "Message from dispatch", message)
+    _push_driver_message_to_plate(plate, message)
 
     return {"ok": True, "plate": plate, "message": message}
 
@@ -1003,6 +1136,7 @@ def get_status(
     lat: float = Query(...),
     lon: float = Query(...),
     ts: int = Query(..., description="Unix epoch seconds from the device"),
+    lang: str = Query("en", description="Language: en, de, nl, ru"),
 ) -> Dict[str, Any]:
     # Enforce geofence, but we do NOT return geofence data anymore
     geofence_check(lat, lon, ts)
@@ -1015,7 +1149,7 @@ def get_status(
             "last_refresh": (SNAPSHOT or {}).get("last_update"),
         }
 
-    st = compute_driver_status(rec)
+    st = compute_driver_status(rec, lang=lang)
 
     dest_text, dlat, dlon = resolve_destination(rec)
     nav = destination_nav_url(dlat, dlon, dest_text)
@@ -1127,6 +1261,7 @@ def get_route(
     lat: float = Query(...),
     lon: float = Query(...),
     ts: int = Query(..., description="Unix epoch seconds from the device"),
+    lang: str = Query("en", description="Language: en, de, nl, ru"),
 ) -> Dict[str, Any]:
     """Return a zoomable route map polyline for the website."""
     geofence_check(lat, lon, ts)
@@ -1144,7 +1279,8 @@ def get_route(
     dest_lat = float(dlat)
     dest_lon = float(dlon)
 
-    route_pts, note = build_route_points(origin_lat, origin_lon, dest_lat, dest_lon)
+    route_pts, route_key = build_route_points(origin_lat, origin_lon, dest_lat, dest_lon)
+    note = route_note_text(route_key, lang)
 
     return {
         "plate": normalize_plate(plate),
@@ -1164,6 +1300,7 @@ def subscribe(
     lat: float = Query(...),
     lon: float = Query(...),
     ts: int = Query(...),
+    lang: str = Query("en", description="Language: en, de, nl, ru"),
     subscription: Dict[str, Any] = Body(...),
 ) -> Dict[str, Any]:
     if not PUSH_ENABLED:
@@ -1179,7 +1316,11 @@ def subscribe(
     subs = SUBSCRIPTIONS_BY_PLATE.get(plate_n, []) or []
     endpoint = subscription.get("endpoint")
     subs = [s for s in subs if s.get("endpoint") != endpoint]
-    subs.append(subscription)
+
+    sub_rec = dict(subscription)
+    sub_rec["lang"] = normalize_lang(lang)
+    subs.append(sub_rec)
+
     SUBSCRIPTIONS_BY_PLATE[plate_n] = subs
 
     return {"ok": True, "plate": plate_n, "count": len(subs)}
@@ -1296,20 +1437,58 @@ INDEX_HTML = r"""<!doctype html>
       background: rgba(255,255,255,0.35);
     }
 
-    
+    .langbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin: 8px 0 10px;
+      flex-wrap: wrap;
+    }
+    .flagbtn {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,0.16);
+      background: rgba(255,255,255,0.55);
+      cursor: pointer;
+      font-size: 22px;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.12);
+      transition: transform 0.08s ease, filter 0.15s ease, box-shadow 0.15s ease;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      padding: 0;
+    }
+    .flagbtn:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 10px 18px rgba(0,0,0,0.16); }
+    .flagbtn:active { transform: translateY(0px); filter: brightness(0.98); box-shadow: 0 7px 14px rgba(0,0,0,0.12); }
+    .flagbtn.active {
+      outline: none;
+      border-color: rgba(77,20,140,0.55);
+      box-shadow: 0 0 0 3px rgba(77,20,140,0.18), 0 8px 16px rgba(0,0,0,0.12);
+    }
 
     @media (max-width: 420px) {
       .row { flex-direction: column; }
       .row-main > button { flex: 0 0 auto; width: 100%; }
       body { background-attachment: scroll; }
     }
-a { color: inherit; }
+    a { color: inherit; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="topcard">
-      <h2 style="margin: 6px 0 12px;">Movement status by license plate</h2>
+      <h2 id="titleH2" style="margin: 6px 0 6px;">Movement status by license plate</h2>
+
+      <div class="langbar" id="langbar" aria-label="Language">
+        <button class="flagbtn" data-lang="en" title="English" aria-label="English">🇬🇧</button>
+        <button class="flagbtn" data-lang="de" title="Deutsch" aria-label="Deutsch">🇩🇪</button>
+        <button class="flagbtn" data-lang="nl" title="Nederlands" aria-label="Nederlands">🇳🇱</button>
+        <button class="flagbtn" data-lang="ru" title="Русский" aria-label="Русский">🇷🇺</button>
+      </div>
 
       <div class="row row-main">
         <input id="plate" placeholder="Enter license plate (e.g. AB-123-CD)" />
@@ -1330,6 +1509,193 @@ a { color: inherit; }
   <script>
     const API_BASE = window.location.origin;
 
+    const SUPPORTED_LANGS = ["en", "de", "nl", "ru"];
+
+    const UI = {
+      en: {
+        title: "Movement status by license plate",
+        plate_ph: "Enter license plate (e.g. AB-123-CD)",
+        btn_check: "Check",
+        btn_notify: "Enable notifications",
+        btn_enabling: "Enabling...",
+        btn_enabled: "Notifications enabled",
+
+        getting_location: "Getting location…",
+        loading_status: "Loading status…",
+        loading_route: "Loading route…",
+
+        no_movement: "No movement found",
+        last_refresh: "Last refresh",
+        destination: "Destination",
+        departure_time: "Departure time",
+        report_office: "Report in the office",
+        trailer: "Trailer",
+        place: "Place",
+        route_map: "Route map",
+        origin: "Origin",
+        destination_pin: "Destination",
+
+        parking: "Parking",
+        dock: "Dock",
+
+        err_location: "Location error",
+        err_network: "Network error",
+        err_error: "Error",
+        help_location: "Enable GPS and allow location permission.",
+
+        notify_not_supported: "Notifications not supported",
+        notify_not_supported_help: "Use Chrome/Edge on Android. iOS requires adding the site to Home Screen.",
+        notify_denied: "Notifications denied",
+        notify_denied_help: "Allow notifications in browser settings.",
+        notify_failed: "Subscribe failed",
+        notify_enabled_msg: "Notifications enabled",
+        notify_enabled_help: "You will receive a push when your status changes.",
+        subscribe_error: "Subscribe error",
+        route_error: "Route error"
+      },
+      de: {
+        title: "Bewegungsstatus nach Kennzeichen",
+        plate_ph: "Kennzeichen eingeben (z. B. AB-123-CD)",
+        btn_check: "Prüfen",
+        btn_notify: "Benachrichtigungen aktivieren",
+        btn_enabling: "Aktiviere…",
+        btn_enabled: "Benachrichtigungen aktiv",
+
+        getting_location: "Standort wird abgerufen…",
+        loading_status: "Status wird geladen…",
+        loading_route: "Route wird geladen…",
+
+        no_movement: "Keine Bewegung gefunden",
+        last_refresh: "Letzte Aktualisierung",
+        destination: "Ziel",
+        departure_time: "Abfahrtszeit",
+        report_office: "Im Büro melden",
+        trailer: "Anhänger",
+        place: "Ort",
+        route_map: "Routenkarte",
+        origin: "Start",
+        destination_pin: "Ziel",
+
+        parking: "Parkplatz",
+        dock: "Tor",
+
+        err_location: "Standortfehler",
+        err_network: "Netzwerkfehler",
+        err_error: "Fehler",
+        help_location: "GPS aktivieren und Standortzugriff erlauben.",
+
+        notify_not_supported: "Benachrichtigungen nicht unterstützt",
+        notify_not_supported_help: "Nutze Chrome/Edge auf Android. Unter iOS muss die Seite zum Home-Bildschirm hinzugefügt werden.",
+        notify_denied: "Benachrichtigungen abgelehnt",
+        notify_denied_help: "Benachrichtigungen in den Browser-Einstellungen erlauben.",
+        notify_failed: "Abonnement fehlgeschlagen",
+        notify_enabled_msg: "Benachrichtigungen aktiv",
+        notify_enabled_help: "Du erhältst eine Push-Nachricht, wenn sich dein Status ändert.",
+        subscribe_error: "Abo-Fehler",
+        route_error: "Routenfehler"
+      },
+      nl: {
+        title: "Bewegingsstatus op kenteken",
+        plate_ph: "Kenteken invoeren (bv. AB-123-CD)",
+        btn_check: "Check",
+        btn_notify: "Meldingen inschakelen",
+        btn_enabling: "Inschakelen…",
+        btn_enabled: "Meldingen ingeschakeld",
+
+        getting_location: "Locatie ophalen…",
+        loading_status: "Status laden…",
+        loading_route: "Route laden…",
+
+        no_movement: "Geen beweging gevonden",
+        last_refresh: "Laatste update",
+        destination: "Bestemming",
+        departure_time: "Vertrektijd",
+        report_office: "Melden op kantoor",
+        trailer: "Trailer",
+        place: "Plek",
+        route_map: "Routekaart",
+        origin: "Start",
+        destination_pin: "Bestemming",
+
+        parking: "Parkeerplaats",
+        dock: "Dock",
+
+        err_location: "Locatiefout",
+        err_network: "Netwerkfout",
+        err_error: "Fout",
+        help_location: "Zet GPS aan en sta locatie-toestemming toe.",
+
+        notify_not_supported: "Meldingen niet ondersteund",
+        notify_not_supported_help: "Gebruik Chrome/Edge op Android. Op iOS moet de site aan het beginscherm worden toegevoegd.",
+        notify_denied: "Meldingen geweigerd",
+        notify_denied_help: "Sta meldingen toe in de browserinstellingen.",
+        notify_failed: "Abonneren mislukt",
+        notify_enabled_msg: "Meldingen ingeschakeld",
+        notify_enabled_help: "Je ontvangt een push als je status verandert.",
+        subscribe_error: "Abonneerfout",
+        route_error: "Routefout"
+      },
+      ru: {
+        title: "Статус рейса по номеру",
+        plate_ph: "Введите номер (например AB-123-CD)",
+        btn_check: "Проверить",
+        btn_notify: "Включить уведомления",
+        btn_enabling: "Включение…",
+        btn_enabled: "Уведомления включены",
+
+        getting_location: "Получаем геолокацию…",
+        loading_status: "Загружаем статус…",
+        loading_route: "Загружаем маршрут…",
+
+        no_movement: "Рейс не найден",
+        last_refresh: "Последнее обновление",
+        destination: "Пункт назначения",
+        departure_time: "Время выезда",
+        report_office: "Подойти в офис",
+        trailer: "Прицеп",
+        place: "Место",
+        route_map: "Карта маршрута",
+        origin: "Старт",
+        destination_pin: "Назначение",
+
+        parking: "Парковка",
+        dock: "Док",
+
+        err_location: "Ошибка геолокации",
+        err_network: "Ошибка сети",
+        err_error: "Ошибка",
+        help_location: "Включите GPS и разрешите доступ к геолокации.",
+
+        notify_not_supported: "Уведомления не поддерживаются",
+        notify_not_supported_help: "Используйте Chrome/Edge на Android. На iOS добавьте сайт на главный экран.",
+        notify_denied: "Уведомления запрещены",
+        notify_denied_help: "Разрешите уведомления в настройках браузера.",
+        notify_failed: "Подписка не удалась",
+        notify_enabled_msg: "Уведомления включены",
+        notify_enabled_help: "Вы получите push, когда статус изменится.",
+        subscribe_error: "Ошибка подписки",
+        route_error: "Ошибка маршрута"
+      }
+    };
+
+    function normLang(v) {
+      try {
+        const s0 = String(v || "").trim().toLowerCase().replaceAll("_", "-");
+        const base = s0.split("-", 1)[0];
+        if (SUPPORTED_LANGS.includes(base)) return base;
+        return "en";
+      } catch (e) {
+        return "en";
+      }
+    }
+
+    let CURRENT_LANG = "en";
+
+    function t(key) {
+      const pack = UI[CURRENT_LANG] || UI.en;
+      return (pack && pack[key]) || (UI.en && UI.en[key]) || key;
+    }
+
     function setNotifyMsg(html, kind) {
       const el = document.getElementById("notifyMsg");
       if (!el) return;
@@ -1340,6 +1706,67 @@ a { color: inherit; }
 
     function normalizePlate(v) {
       return (v || "").toUpperCase().trim().replaceAll(" ", "").replaceAll("-", "");
+    }
+
+    function getInitialLang() {
+      try {
+        const l = new URLSearchParams(window.location.search).get("lang") || "";
+        const ln = normLang(l);
+        if (ln) return ln;
+      } catch (e) {}
+      try {
+        const ls = localStorage.getItem("lang") || "";
+        const ln2 = normLang(ls);
+        if (ln2) return ln2;
+      } catch (e) {}
+      try {
+        const nav = (navigator.language || navigator.userLanguage || "") || "";
+        const ln3 = normLang(nav);
+        if (ln3) return ln3;
+      } catch (e) {}
+      return "en";
+    }
+
+    function setCurrentLang(lang) {
+      const ln = normLang(lang);
+      CURRENT_LANG = ln;
+      try { localStorage.setItem("lang", ln); } catch (e) {}
+      try {
+        const u = new URL(window.location.href);
+        u.searchParams.set("lang", ln);
+        history.replaceState(null, "", u.toString());
+      } catch (e) {}
+      try { document.documentElement.lang = ln; } catch (e) {}
+      applyLangUI();
+      updateLangButtons();
+    }
+
+    function updateLangButtons() {
+      const bar = document.getElementById("langbar");
+      if (!bar) return;
+      const btns = bar.querySelectorAll("button[data-lang]");
+      btns.forEach((b) => {
+        const l = normLang(b.getAttribute("data-lang") || "");
+        if (l === CURRENT_LANG) b.classList.add("active");
+        else b.classList.remove("active");
+      });
+    }
+
+    function applyLangUI() {
+      const h2 = document.getElementById("titleH2");
+      if (h2) h2.textContent = t("title");
+
+      const plate = document.getElementById("plate");
+      if (plate) plate.setAttribute("placeholder", t("plate_ph"));
+
+      const btn = document.getElementById("btn");
+      if (btn) btn.textContent = t("btn_check");
+
+      const bn = document.getElementById("btnNotify");
+      if (bn && bn.style.display !== "none") {
+        if (bn.disabled && bn.textContent === UI.en.btn_enabled) bn.textContent = t("btn_enabled");
+        else bn.textContent = t("btn_notify");
+      }
     }
 
     function getInitialPlate() {
@@ -1362,6 +1789,7 @@ a { color: inherit; }
       try {
         const u = new URL(window.location.href);
         u.searchParams.set("plate", pn);
+        u.searchParams.set("lang", CURRENT_LANG);
         history.replaceState(null, "", u.toString());
       } catch (e) {}
     }
@@ -1405,10 +1833,10 @@ a { color: inherit; }
         attribution: "&copy; OpenStreetMap contributors",
       }).addTo(_map);
 
-      setMapNote("Loading route…", false);
+      setMapNote(t("loading_route"), false);
 
       try {
-        const url = `${API_BASE}/api/route?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}`;
+        const url = `${API_BASE}/api/route?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}&lang=${encodeURIComponent(CURRENT_LANG)}`;
         const res = await fetch(url);
         const data = await readJsonOrText(res);
 
@@ -1428,16 +1856,16 @@ a { color: inherit; }
         }
 
         if (data.origin && data.origin.lat != null && data.origin.lon != null) {
-          L.marker([data.origin.lat, data.origin.lon]).addTo(_map).bindPopup("Origin");
+          L.marker([data.origin.lat, data.origin.lon]).addTo(_map).bindPopup(t("origin"));
         }
         if (data.dest && data.dest.lat != null && data.dest.lon != null) {
-          L.marker([data.dest.lat, data.dest.lon]).addTo(_map).bindPopup("Destination");
+          L.marker([data.dest.lat, data.dest.lon]).addTo(_map).bindPopup(t("destination_pin"));
         }
 
         setMapNote(data.note || "", false);
         setTimeout(() => { if (_map) _map.invalidateSize(); }, 80);
       } catch (e) {
-        setMapNote("Route error: " + e, true);
+        setMapNote(t("route_error") + ": " + e, true);
         try { _map.setView([loc.lat, loc.lon], 10); } catch (e2) {}
         setTimeout(() => { if (_map) _map.invalidateSize(); }, 80);
       }
@@ -1478,27 +1906,27 @@ a { color: inherit; }
 
       destroyMap();
 
-      show(`<div class="muted">Getting location…</div>`);
+      show(`<div class="muted">${t("getting_location")}</div>`);
 
       let loc;
       try {
         loc = await getLocation();
       } catch (e) {
         destroyMap();
-        show(`<b>Location error:</b> ${e.message}<div class="muted">Enable GPS and allow location permission.</div>`, "err");
+        show(`<b>${t("err_location")}:</b> ${e.message}<div class="muted">${t("help_location")}</div>`, "err");
         return;
       }
 
-      show(`<div class="muted">Loading status…</div>`);
+      show(`<div class="muted">${t("loading_status")}</div>`);
 
       try {
-        const url = `${API_BASE}/api/status?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}`;
+        const url = `${API_BASE}/api/status?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}&lang=${encodeURIComponent(CURRENT_LANG)}`;
         const res = await fetch(url);
         const data = await readJsonOrText(res);
 
         if (!res.ok) {
           destroyMap();
-          show(`<b>Error:</b> ${data.detail || res.statusText}`, "err");
+          show(`<b>${t("err_error")}:</b> ${data.detail || res.statusText}`, "err");
           document.getElementById("btnNotify").style.display = "none";
           setNotifyMsg("", "");
           return;
@@ -1509,8 +1937,8 @@ a { color: inherit; }
         if (!data.found) {
           destroyMap();
           show(`
-            <div class="status-big">No movement found</div>
-            <div class="muted">Last refresh: ${last}</div>
+            <div class="status-big">${t("no_movement")}</div>
+            <div class="muted">${t("last_refresh")}: ${last}</div>
           `, "warn");
           document.getElementById("btnNotify").style.display = "none";
           setNotifyMsg("", "");
@@ -1530,38 +1958,36 @@ a { color: inherit; }
           // If location begins with "P" → show "Parking <number>"
           if (/^[Pp]/.test(locVal)) {
             let rest = locVal.slice(1).trim();
-
-            // Prefer digits (e.g. "P12" / "P 012")
             const digits = (rest.match(/\d+/g) || []).join("");
             if (digits) {
               const num = digits.replace(/^0+/, "") || "0";
-              placeText = `Parking ${num}`;
+              placeText = `${t("parking")} ${num}`;
             } else if (rest) {
-              placeText = `Parking ${rest}`;
+              placeText = `${t("parking")} ${rest}`;
             } else {
-              placeText = "Parking";
+              placeText = t("parking");
             }
           }
           // If location begins with a number → show "Dock <location>"
           else if (/^\d/.test(locVal)) {
-            placeText = `Dock ${locVal}`;
+            placeText = `${t("dock")} ${locVal}`;
           }
 
           extraTrailerPlace = `
-          <div style="margin-top:6px;"><b>Trailer:</b> ${trailerVal || "-"}</div>
-          <div><b>Place:</b> ${placeText}</div>`;
+          <div style="margin-top:6px;"><b>${t("trailer")}:</b> ${trailerVal || "-"}</div>
+          <div><b>${t("place")}:</b> ${placeText}</div>`;
         }
 
         show(`
           <div class="status-big">"${data.status_text}"</div>
           <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
-          <div><b>Destination:</b> ${destLink}</div>
-          <div><b>Departure time:</b> ${data.scheduled_departure || "-"}</div>
-          <div><b>Report in the office:</b> ${data.report_in_office_at || "-"}</div>
+          <div><b>${t("destination")}:</b> ${destLink}</div>
+          <div><b>${t("departure_time")}:</b> ${data.scheduled_departure || "-"}</div>
+          <div><b>${t("report_office")}:</b> ${data.report_in_office_at || "-"}</div>
           ${extraTrailerPlace}
-          <div class="muted" style="margin-top:8px;">Last refresh: ${last}</div>
+          <div class="muted" style="margin-top:8px;">${t("last_refresh")}: ${last}</div>
 
-          <div style="margin-top:12px;"><b>Route map:</b></div>
+          <div style="margin-top:12px;"><b>${t("route_map")}:</b></div>
           <div id="map"></div>
           <div id="mapNote" class="muted" style="margin-top:6px;"></div>
         `, "ok");
@@ -1573,7 +1999,7 @@ a { color: inherit; }
           bn.style.display = "block";
           bn.onclick = () => enableNotifications(plate, loc, data.vapid_public_key);
           bn.disabled = false;
-          bn.textContent = "Enable notifications";
+          bn.textContent = t("btn_notify");
           bn.style.opacity = "";
           setNotifyMsg("", "");
         } else {
@@ -1583,7 +2009,7 @@ a { color: inherit; }
 
       } catch (e) {
         destroyMap();
-        show(`<b>Network error:</b> ${e}`, "err");
+        show(`<b>${t("err_network")}:</b> ${e}`, "err");
         document.getElementById("btnNotify").style.display = "none";
         setNotifyMsg("", "");
       }
@@ -1603,22 +2029,23 @@ a { color: inherit; }
         const bn0 = document.getElementById("btnNotify");
         if (bn0) {
           bn0.disabled = true;
-          bn0.textContent = "Enabling...";
+          bn0.textContent = t("btn_enabling");
           bn0.style.opacity = "0.75";
         }
-        setNotifyMsg("<div class=\"muted\">Enabling notifications…</div>", "");
+        setNotifyMsg(`<div class="muted">${t("btn_enabling")}</div>`, "");
+
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-          setNotifyMsg(`<b>Notifications not supported</b><div class="muted">Use Chrome/Edge on Android. iOS requires adding the site to Home Screen.</div>`, "err");
+          setNotifyMsg(`<b>${t("notify_not_supported")}</b><div class="muted">${t("notify_not_supported_help")}</div>`, "err");
           const bn1 = document.getElementById("btnNotify");
-          if (bn1) { bn1.disabled = false; bn1.textContent = "Enable notifications"; bn1.style.opacity = ""; }
+          if (bn1) { bn1.disabled = false; bn1.textContent = t("btn_notify"); bn1.style.opacity = ""; }
           return;
         }
 
         const perm = await Notification.requestPermission();
         if (perm !== 'granted') {
-          setNotifyMsg(`<b>Notifications denied</b><div class="muted">Allow notifications in browser settings.</div>`, "err");
+          setNotifyMsg(`<b>${t("notify_denied")}</b><div class="muted">${t("notify_denied_help")}</div>`, "err");
           const bn2 = document.getElementById("btnNotify");
-          if (bn2) { bn2.disabled = false; bn2.textContent = "Enable notifications"; bn2.style.opacity = ""; }
+          if (bn2) { bn2.disabled = false; bn2.textContent = t("btn_notify"); bn2.style.opacity = ""; }
           return;
         }
 
@@ -1629,10 +2056,10 @@ a { color: inherit; }
         if (!sw) throw new Error("Service Worker registration failed.");
         await new Promise((resolve, reject) => {
           if (sw.state === 'activated') return resolve();
-          const t = setTimeout(() => reject(new Error("Service Worker activation timeout.")), 8000);
+          const tmo = setTimeout(() => reject(new Error("Service Worker activation timeout.")), 8000);
           sw.addEventListener('statechange', () => {
             if (sw.state === 'activated') {
-              clearTimeout(t);
+              clearTimeout(tmo);
               resolve();
             }
           });
@@ -1644,7 +2071,7 @@ a { color: inherit; }
           applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
         });
 
-        const resp = await fetch(`${API_BASE}/api/subscribe?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}`, {
+        const resp = await fetch(`${API_BASE}/api/subscribe?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}&lang=${encodeURIComponent(CURRENT_LANG)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(sub),
@@ -1652,24 +2079,24 @@ a { color: inherit; }
 
         const data = await readJsonOrText(resp);
         if (!resp.ok) {
-          setNotifyMsg(`<b>Subscribe failed:</b> ${data.detail || resp.statusText}`, "err");
+          setNotifyMsg(`<b>${t("notify_failed")}:</b> ${data.detail || resp.statusText}`, "err");
           const bn3 = document.getElementById("btnNotify");
-          if (bn3) { bn3.disabled = false; bn3.textContent = "Enable notifications"; bn3.style.opacity = ""; }
+          if (bn3) { bn3.disabled = false; bn3.textContent = t("btn_notify"); bn3.style.opacity = ""; }
           return;
         }
 
         const bn = document.getElementById("btnNotify");
         if (bn) {
           bn.disabled = true;
-          bn.textContent = "Notifications enabled";
+          bn.textContent = t("btn_enabled");
           bn.style.opacity = "0.75";
           bn.onclick = null;
         }
-        setNotifyMsg(`<b>Notifications enabled</b><div class="muted">You will receive a push when your status changes.</div>`, "");
+        setNotifyMsg(`<b>${t("notify_enabled_msg")}</b><div class="muted">${t("notify_enabled_help")}</div>`, "");
       } catch (e) {
-        setNotifyMsg(`<b>Subscribe error:</b> ${e}`, "err");
+        setNotifyMsg(`<b>${t("subscribe_error")}:</b> ${e}`, "err");
         const bn4 = document.getElementById("btnNotify");
-        if (bn4) { bn4.disabled = false; bn4.textContent = "Enable notifications"; bn4.style.opacity = ""; }
+        if (bn4) { bn4.disabled = false; bn4.textContent = t("btn_notify"); bn4.style.opacity = ""; }
       }
     }
 
@@ -1678,17 +2105,35 @@ a { color: inherit; }
       if (e.key === "Enter") checkStatus();
     });
 
+    // Language buttons
+    (function initLang() {
+      setCurrentLang(getInitialLang());
+      const bar = document.getElementById("langbar");
+      if (bar) {
+        bar.addEventListener("click", (ev) => {
+          const btn = ev.target && ev.target.closest ? ev.target.closest("button[data-lang]") : null;
+          if (!btn) return;
+          const l = btn.getAttribute("data-lang") || "en";
+          setCurrentLang(l);
+        });
+      }
+    })();
+
     // Restore plate from URL or last usage and auto-run once
     (function initPlate() {
       const p = getInitialPlate();
       if (p) {
         document.getElementById("plate").value = p;
         setTimeout(() => { checkStatus(); }, 50);
+      } else {
+        applyLangUI();
+        updateLangButtons();
       }
     })();
   </script>
 </body>
 </html>"""
+
 
 
 SERVICE_WORKER_JS = r"""
