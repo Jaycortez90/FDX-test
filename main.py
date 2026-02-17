@@ -384,10 +384,10 @@ def _here_fetch_delay_minutes(
         # but urllib raises HTTPError; keep it simple.
         return None, f"HERE request failed ({type(e).__name__})"
 
-SUPPORTED_LANGS = {"en", "de", "nl", "ru", "lt", "kk", "hi", "pl", "hu"}
+SUPPORTED_LANGS = {"en", "de", "nl", "ru", "lt", "kk", "hi", "pl", "hu", "uz", "tg", "ky", "be"}
 
 def normalize_lang(value: Any) -> str:
-    """Return one of: en, de, nl, ru, lt, kk, hi, pl, hu."""
+    """Return one of: en, de, nl, ru, lt, kk, hi, pl, hu, uz, tg, ky, be."""
     s = str(value or "").strip().lower()
     if not s:
         return "en"
@@ -415,6 +415,15 @@ def normalize_lang(value: Any) -> str:
         return "pl"
     if base in {"hun"}:
         return "hu"
+    if base in {"uzb"}:
+        return "uz"
+    if base in {"tgk", "taj", "tj"}:
+        return "tg"
+    if base in {"kir", "kg"}:
+        return "ky"
+    if base in {"bel", "by"}:
+        return "be"
+
     return "en"
 
 
@@ -491,6 +500,38 @@ _I18N_STATUS: Dict[str, Dict[str, str]] = {
         "LOADING_WAIT": "A pótkocsid rakodás alatt – kérjük, várj!",
         "REPORT_OFFICE": "Kérjük, jelentkezz az irodában!",
     },
+    "uz": {
+        "DEPARTED": "Xavfsiz haydang — sizni qaytib kelishingizni kutamiz!",
+        "LOCATION_WITH_TRAILER": "Iltimos, {location} joyida {trailer} treylerini ulang va CMR hujjatlarini ofisdan oling!",
+        "LOCATION_NO_TRAILER": "Iltimos, {location} joyida treylerini ulang va CMR hujjatlarini ofisdan oling!",
+        "CLOSEDOOR_NO_LOCATION": "Treyleringiz tayyor. Qo‘shimcha ma’lumot uchun ofisga murojaat qiling!",
+        "LOADING_WAIT": "Treyleringiz yuklanmoqda — iltimos, kuting!",
+        "REPORT_OFFICE": "Iltimos, ofisga murojaat qiling!",
+    },
+    "tg": {
+        "DEPARTED": "Сафар ба хайр — мо шуморо боз интизорем!",
+        "LOCATION_WITH_TRAILER": "Лутфан прицепи {trailer}-ро дар ҷойи {location} васл кунед ва ҳуҷҷатҳои CMR-ро аз офис гиред!",
+        "LOCATION_NO_TRAILER": "Лутфан прицепро дар ҷойи {location} васл кунед ва ҳуҷҷатҳои CMR-ро аз офис гиред!",
+        "CLOSEDOOR_NO_LOCATION": "Прицепи шумо тайёр аст. Барои маълумоти бештар ба офис ҳозир шавед!",
+        "LOADING_WAIT": "Прицепи шумо бор карда мешавад — лутфан интизор шавед!",
+        "REPORT_OFFICE": "Лутфан ба офис ҳозир шавед!",
+    },
+    "ky": {
+        "DEPARTED": "Жолуңуз болсун — кайра келишиңизди күтөбүз!",
+        "LOCATION_WITH_TRAILER": "Сураныч, {location} жерде {trailer} чиркегичин туташтырып, CMR документтерин кеңседен алыңыз!",
+        "LOCATION_NO_TRAILER": "Сураныч, {location} жерде чиркегичти туташтырып, CMR документтерин кеңседен алыңыз!",
+        "CLOSEDOOR_NO_LOCATION": "Чиркегичиңиз даяр. Кошумча маалымат үчүн кеңсеге келиңиз!",
+        "LOADING_WAIT": "Чиркегичиңиз жүктөлүүдө — сураныч, күтө туруңуз!",
+        "REPORT_OFFICE": "Сураныч, кеңсеге келиңиз!",
+    },
+    "be": {
+        "DEPARTED": "Шчаслівай дарогі — чакаем вас назад!",
+        "LOCATION_WITH_TRAILER": "Калі ласка, прычапіце прычэп {trailer} у месцы: {location} і забярыце дакументы CMR у офісе!",
+        "LOCATION_NO_TRAILER": "Калі ласка, прычапіце прычэп у месцы: {location} і забярыце дакументы CMR у офісе!",
+        "CLOSEDOOR_NO_LOCATION": "Ваш прычэп гатовы. Калі ласка, зайдзіце ў офіс для далейшай інфармацыі!",
+        "LOADING_WAIT": "Ваш прычэп загружаецца — калі ласка, пачакайце!",
+        "REPORT_OFFICE": "Калі ласка, зайдзіце ў офіс!",
+    },
 }
 
 _I18N_PUSH_TITLES: Dict[str, Dict[str, str]] = {
@@ -503,6 +544,10 @@ _I18N_PUSH_TITLES: Dict[str, Dict[str, str]] = {
     "hi": {"STATUS_UPDATE": "स्थिति अपडेट", "MESSAGE_FROM_DISPATCH": "डिस्पैच से संदेश"},
     "pl": {"STATUS_UPDATE": "Aktualizacja statusu", "MESSAGE_FROM_DISPATCH": "Wiadomość od dyspozytora"},
     "hu": {"STATUS_UPDATE": "Státusz frissítés", "MESSAGE_FROM_DISPATCH": "Üzenet a diszpécsertől"},
+    "uz": {"STATUS_UPDATE": "Holat yangilanishi", "MESSAGE_FROM_DISPATCH": "Dispetcherdan xabar"},
+    "tg": {"STATUS_UPDATE": "Навсозии ҳолат", "MESSAGE_FROM_DISPATCH": "Паём аз диспетчер"},
+    "ky": {"STATUS_UPDATE": "Абалды жаңыртуу", "MESSAGE_FROM_DISPATCH": "Диспетчерден билдирүү"},
+    "be": {"STATUS_UPDATE": "Абнаўленне статусу", "MESSAGE_FROM_DISPATCH": "Паведамленне ад дыспетчара"},
 }
 
 _I18N_ROUTE_NOTE: Dict[str, Dict[str, str]] = {
@@ -515,6 +560,10 @@ _I18N_ROUTE_NOTE: Dict[str, Dict[str, str]] = {
     "hi": {"ORS": "मार्ग स्रोत: OpenRouteService", "OSRM": "मार्ग स्रोत: OSRM", "DIRECT": "मार्ग स्रोत: सीधी रेखा"},
     "pl": {"ORS": "Źródło trasy: OpenRouteService", "OSRM": "Źródło trasy: OSRM", "DIRECT": "Źródło trasy: linia prosta"},
     "hu": {"ORS": "Útvonal forrása: OpenRouteService", "OSRM": "Útvonal forrása: OSRM", "DIRECT": "Útvonal forrása: egyenes vonal"},
+    "uz": {"ORS": "Marshrut manbai: OpenRouteService", "OSRM": "Marshrut manbai: OSRM", "DIRECT": "Marshrut manbai: to‘g‘ri chiziq"},
+    "tg": {"ORS": "Манбаи масир: OpenRouteService", "OSRM": "Манбаи масир: OSRM", "DIRECT": "Манбаи масир: хатти рост"},
+    "ky": {"ORS": "Маршрут булагы: OpenRouteService", "OSRM": "Маршрут булагы: OSRM", "DIRECT": "Маршрут булагы: түз сызык"},
+    "be": {"ORS": "Крыніца маршруту: OpenRouteService", "OSRM": "Крыніца маршруту: OSRM", "DIRECT": "Крыніца маршруту: прамая лінія"},
 }
 
 def route_note_text(route_key: str, lang: str = "en") -> str:
@@ -1552,6 +1601,10 @@ INDEX_HTML = r"""<!doctype html>
         <button class="flagbtn" data-lang="hi" title="हिन्दी" aria-label="हिन्दी">🇮🇳</button>
         <button class="flagbtn" data-lang="pl" title="Polski" aria-label="Polski">🇵🇱</button>
         <button class="flagbtn" data-lang="hu" title="Magyar" aria-label="Magyar">🇭🇺</button>
+        <button class="flagbtn" data-lang="uz" title="O‘zbek" aria-label="O‘zbek">🇺🇿</button>
+        <button class="flagbtn" data-lang="tg" title="Тоҷикӣ" aria-label="Тоҷикӣ">🇹🇯</button>
+        <button class="flagbtn" data-lang="ky" title="Кыргызча" aria-label="Кыргызча">🇰🇬</button>
+        <button class="flagbtn" data-lang="be" title="Беларуская" aria-label="Беларуская">🇧🇾</button>
       </div>
 
       <div class="row row-main">
@@ -1571,7 +1624,7 @@ INDEX_HTML = r"""<!doctype html>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    const API_BASE = window.location.origin;    const SUPPORTED_LANGS = ["en", "de", "nl", "ru", "lt", "kk", "hi", "pl", "hu"];
+    const API_BASE = window.location.origin;    const SUPPORTED_LANGS = ["en", "de", "nl", "ru", "lt", "kk", "hi", "pl", "hu", "uz", "tg", "ky", "be"];
     const UI = {
       en: {
         title: "Movement status by license plate",
@@ -1941,7 +1994,172 @@ INDEX_HTML = r"""<!doctype html>
         notify_enabled_help: "Push értesítést kapsz, ha a státusz változik.",
         subscribe_error: "Feliratkozási hiba",
         route_error: "Útvonal hiba"
-      }
+      },
+      uz: {
+  title: "Davlat raqami bo‘yicha harakat holati",
+  plate_ph: "Davlat raqamini kiriting (masalan AB-123-CD)",
+  btn_check: "Tekshirish",
+  btn_notify: "Bildirishnomalarni yoqish",
+  btn_enabling: "Yoqilmoqda…",
+  btn_enabled: "Bildirishnomalar yoqildi",
+
+  getting_location: "Joylashuv olinmoqda…",
+  loading_status: "Holat yuklanmoqda…",
+  loading_route: "Marshrut yuklanmoqda…",
+
+  no_movement: "Harakat topilmadi",
+  last_refresh: "Oxirgi yangilanish",
+  destination: "Manzil",
+  departure_time: "Jo‘nash vaqti",
+  report_office: "Ofisga murojaat qiling",
+  trailer: "Treyler",
+  place: "Joy",
+  route_map: "Marshrut xaritasi",
+  origin: "Boshlanish",
+  destination_pin: "Manzil",
+
+  parking: "Parkovka",
+  dock: "Dok",
+
+  err_location: "Joylashuv xatosi",
+  err_network: "Tarmoq xatosi",
+  err_error: "Xato",
+  help_location: "GPS-ni yoqing va joylashuv ruxsatini bering.",
+
+  notify_not_supported: "Bildirishnomalar qo‘llab-quvvatlanmaydi",
+  notify_not_supported_help: "Androidda Chrome/Edge’dan foydalaning. iOS’da saytni Home Screen’ga qo‘shish kerak.",
+  notify_denied: "Bildirishnomalar rad etildi",
+  notify_denied_help: "Brauzer sozlamalarida bildirishnomalarga ruxsat bering.",
+  notify_failed: "Obuna bo‘lish muvaffaqiyatsiz",
+  notify_enabled_msg: "Bildirishnomalar yoqildi",
+  notify_enabled_help: "Holat o‘zgarsa push xabar olasiz.",
+  subscribe_error: "Obuna xatosi",
+  route_error: "Marshrut xatosi"
+      },
+      tg: {
+  title: "Ҳолати ҳаракат аз рӯи рақами мошин",
+  plate_ph: "Рақамро ворид кунед (масалан AB-123-CD)",
+  btn_check: "Санҷидан",
+  btn_notify: "Фаъол кардани огоҳиномаҳо",
+  btn_enabling: "Фаъол мешавад…",
+  btn_enabled: "Огоҳиномаҳо фаъол шуданд",
+
+  getting_location: "Ҷойгиршавӣ гирифта мешавад…",
+  loading_status: "Ҳолат бор мешавад…",
+  loading_route: "Масир бор мешавад…",
+
+  no_movement: "Ҳаракат ёфт нашуд",
+  last_refresh: "Охирин навсозӣ",
+  destination: "Самт",
+  departure_time: "Вақти баромад",
+  report_office: "Ба офис ҳозир шавед",
+  trailer: "Прицеп",
+  place: "Ҷой",
+  route_map: "Харитаи масир",
+  origin: "Оғоз",
+  destination_pin: "Самт",
+
+  parking: "Парковка",
+  dock: "Док",
+
+  err_location: "Хатои ҷойгиршавӣ",
+  err_network: "Хатои шабака",
+  err_error: "Хато",
+  help_location: "GPS-ро фаъол кунед ва иҷозати ҷойгиршавиро диҳед.",
+
+  notify_not_supported: "Огоҳиномаҳо дастгирӣ намешаванд",
+  notify_not_supported_help: "Дар Android Chrome/Edge истифода баред. Дар iOS сайтро ба Home Screen илова кунед.",
+  notify_denied: "Огоҳиномаҳо рад шуданд",
+  notify_denied_help: "Дар танзимоти браузер огоҳиномаҳоро иҷозат диҳед.",
+  notify_failed: "Обуна шудан ноком шуд",
+  notify_enabled_msg: "Огоҳиномаҳо фаъол шуданд",
+  notify_enabled_help: "Ҳангоми тағйири ҳолат push мегиред.",
+  subscribe_error: "Хатои обуна",
+  route_error: "Хатои масир"
+      },
+      ky: {
+  title: "Мамлекеттик номер боюнча кыймылдын абалы",
+  plate_ph: "Номерди киргизиңиз (мисалы AB-123-CD)",
+  btn_check: "Текшерүү",
+  btn_notify: "Билдирмелерди күйгүзүү",
+  btn_enabling: "Күйгүзүлүүдө…",
+  btn_enabled: "Билдирмелер күйгүзүлдү",
+
+  getting_location: "Жайгашкан жер алынууда…",
+  loading_status: "Абалы жүктөлүүдө…",
+  loading_route: "Маршрут жүктөлүүдө…",
+
+  no_movement: "Кыймыл табылган жок",
+  last_refresh: "Акыркы жаңыртуу",
+  destination: "Багыт",
+  departure_time: "Жөнөө убактысы",
+  report_office: "Кеңсеге кайрылыңыз",
+  trailer: "Чиркегич",
+  place: "Жай",
+  route_map: "Маршрут картасы",
+  origin: "Башталыш",
+  destination_pin: "Багыт",
+
+  parking: "Токтотмо",
+  dock: "Док",
+
+  err_location: "Жайгашуу катасы",
+  err_network: "Тармак катасы",
+  err_error: "Ката",
+  help_location: "GPSти күйгүзүп, геолокацияга уруксат бериңиз.",
+
+  notify_not_supported: "Билдирмелер колдоого алынбайт",
+  notify_not_supported_help: "Android'де Chrome/Edge колдонуңуз. iOS'то сайтты Home Screen'ге кошуңуз.",
+  notify_denied: "Билдирмелерге тыюу салынды",
+  notify_denied_help: "Браузердин жөндөөлөрүнөн билдирмелерге уруксат бериңиз.",
+  notify_failed: "Жазылуу ийгиликсиз",
+  notify_enabled_msg: "Билдирмелер күйгүзүлдү",
+  notify_enabled_help: "Абалы өзгөрсө, push билдирүү аласыз.",
+  subscribe_error: "Жазылуу катасы",
+  route_error: "Маршрут катасы"
+      },
+      be: {
+  title: "Статус руху pa нумары",
+  plate_ph: "Увядзіце нумар (напрыклад AB-123-CD)",
+  btn_check: "Праверыць",
+  btn_notify: "Уключыць апавяшчэнні",
+  btn_enabling: "Уключэнне…",
+  btn_enabled: "Апавяшчэнні ўключаны",
+
+  getting_location: "Атрымліваем месцазнаходжанне…",
+  loading_status: "Загружаем статус…",
+  loading_route: "Загружаем маршрут…",
+
+  no_movement: "Рух не знойдзены",
+  last_refresh: "Апошняе абнаўленне",
+  destination: "Пункт прызначэння",
+  departure_time: "Час выезду",
+  report_office: "Зайдзіце ў офіс",
+  trailer: "Прычэп",
+  place: "Месца",
+  route_map: "Карта маршруту",
+  origin: "Старт",
+  destination_pin: "Прызначэнне",
+
+  parking: "Паркоўка",
+  dock: "Док",
+
+  err_location: "Памылка месцазнаходжання",
+  err_network: "Памылка сеткі",
+  err_error: "Памылка",
+  help_location: "Уключыце GPS і дазвольце доступ да месцазнаходжання.",
+
+  notify_not_supported: "Апавяшчэнні не падтрымліваюцца",
+  notify_not_supported_help: "Выкарыстоўвайце Chrome/Edge на Android. На iOS дадайце сайт на Home Screen.",
+  notify_denied: "Апавяшчэнні забароненыя",
+  notify_denied_help: "Дазвольце апавяшчэнні ў наладах браўзера.",
+  notify_failed: "Падпіска не атрымалася",
+  notify_enabled_msg: "Апавяшчэнні ўключаны",
+  notify_enabled_help: "Вы атрымаеце push, калі статус зменіцца.",
+  subscribe_error: "Памылка падпіскі",
+  route_error: "Памылка маршруту"
+}
+
     };
 
 
@@ -1952,6 +2170,10 @@ INDEX_HTML = r"""<!doctype html>
         if (SUPPORTED_LANGS.includes(base)) return base;
         // common aliases
         if (base === "kz" || base === "kaz") return "kk";
+      if (base === "uzb") return "uz";
+      if (base === "tgk" || base === "taj" || base === "tj") return "tg";
+      if (base === "kir" || base === "kg") return "ky";
+      if (base === "bel" || base === "by") return "be";
         return "en";
       } catch (e) {
         return "en";
