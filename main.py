@@ -384,10 +384,10 @@ def _here_fetch_delay_minutes(
         # but urllib raises HTTPError; keep it simple.
         return None, f"HERE request failed ({type(e).__name__})"
 
-SUPPORTED_LANGS = {"en", "de", "nl", "ru", "lt", "kk", "hi", "pl", "hu", "uz", "tg", "ky", "be"}
+SUPPORTED_LANGS = {"en", "de", "nl", "es", "it", "ro", "ru", "lt", "kk", "hi", "pl", "hu", "uz", "tg", "ky", "be"}
 
 def normalize_lang(value: Any) -> str:
-    """Return one of: en, de, nl, ru, lt, kk, hi, pl, hu, uz, tg, ky, be."""
+    """Return one of: en, de, nl, es, it, ro, ru, lt, kk, hi, pl, hu, uz, tg, ky, be."""
     s = str(value or "").strip().lower()
     if not s:
         return "en"
@@ -424,6 +424,13 @@ def normalize_lang(value: Any) -> str:
     if base in {"bel", "by"}:
         return "be"
 
+    if base in {"spa", "esp"}:
+        return "es"
+    if base in {"ita"}:
+        return "it"
+    if base in {"rom", "ron", "rum"}:
+        return "ro"
+
     return "en"
 
 
@@ -451,6 +458,31 @@ _I18N_STATUS: Dict[str, Dict[str, str]] = {
         "CLOSEDOOR_NO_LOCATION": "Je trailer is gereed. Meld je in het kantoor voor verdere informatie!",
         "LOADING_WAIT": "Je trailer wordt geladen – even wachten!",
         "REPORT_OFFICE": "Meld je in het kantoor!",
+    },
+
+    "es": {
+        "DEPARTED": "Buen viaje — ¡te esperamos de vuelta!",
+        "LOCATION_WITH_TRAILER": "Por favor conecta el remolque {trailer} en la ubicación: {location} y recoge los documentos CMR en la oficina!",
+        "LOCATION_NO_TRAILER": "Por favor conecta el remolque en la ubicación: {location} y recoge los documentos CMR en la oficina!",
+        "CLOSEDOOR_NO_LOCATION": "Tu remolque está listo. Preséntate en la oficina para más información!",
+        "LOADING_WAIT": "Tu remolque se está cargando — espera, por favor!",
+        "REPORT_OFFICE": "¡Preséntate en la oficina!",
+    },
+    "it": {
+        "DEPARTED": "Buon viaggio — ti aspettiamo di nuovo!",
+        "LOCATION_WITH_TRAILER": "Collega il rimorchio {trailer} alla posizione: {location} e ritira i documenti CMR in ufficio!",
+        "LOCATION_NO_TRAILER": "Collega il rimorchio alla posizione: {location} e ritira i documenti CMR in ufficio!",
+        "CLOSEDOOR_NO_LOCATION": "Il tuo rimorchio è pronto. Presentati in ufficio per ulteriori informazioni!",
+        "LOADING_WAIT": "Il tuo rimorchio è in carico — attendi!",
+        "REPORT_OFFICE": "Presentati in ufficio!",
+    },
+    "ro": {
+        "DEPARTED": "Drum bun — te așteptăm înapoi!",
+        "LOCATION_WITH_TRAILER": "Vă rugăm să conectați remorca {trailer} la locația: {location} și să ridicați documentele CMR din birou!",
+        "LOCATION_NO_TRAILER": "Vă rugăm să conectați remorca la locația: {location} și să ridicați documentele CMR din birou!",
+        "CLOSEDOOR_NO_LOCATION": "Remorca ta este gata. Te rugăm să te prezinți la birou pentru informații suplimentare!",
+        "LOADING_WAIT": "Remorca ta este în curs de încărcare — te rugăm să aștepți!",
+        "REPORT_OFFICE": "Te rugăm să te prezinți la birou!",
     },
     "ru": {
         "DEPARTED": "Счастливого пути — ждём вас обратно!",
@@ -538,6 +570,10 @@ _I18N_PUSH_TITLES: Dict[str, Dict[str, str]] = {
     "en": {"STATUS_UPDATE": "Status update", "MESSAGE_FROM_DISPATCH": "Message from dispatch"},
     "de": {"STATUS_UPDATE": "Status-Update", "MESSAGE_FROM_DISPATCH": "Nachricht von der Disposition"},
     "nl": {"STATUS_UPDATE": "Statusupdate", "MESSAGE_FROM_DISPATCH": "Bericht van de planning"},
+
+    "es": {"STATUS_UPDATE": "Actualización de estado", "MESSAGE_FROM_DISPATCH": "Mensaje del despacho"},
+    "it": {"STATUS_UPDATE": "Aggiornamento stato", "MESSAGE_FROM_DISPATCH": "Messaggio dal dispatch"},
+    "ro": {"STATUS_UPDATE": "Actualizare status", "MESSAGE_FROM_DISPATCH": "Mesaj de la dispecerat"},
     "ru": {"STATUS_UPDATE": "Обновление статуса", "MESSAGE_FROM_DISPATCH": "Сообщение от диспетчера"},
     "lt": {"STATUS_UPDATE": "Būsenos atnaujinimas", "MESSAGE_FROM_DISPATCH": "Žinutė iš dispečerio"},
     "kk": {"STATUS_UPDATE": "Күй жаңартуы", "MESSAGE_FROM_DISPATCH": "Диспетчерден хабарлама"},
@@ -554,6 +590,10 @@ _I18N_ROUTE_NOTE: Dict[str, Dict[str, str]] = {
     "en": {"ORS": "Route source: OpenRouteService", "OSRM": "Route source: OSRM", "DIRECT": "Route source: direct line"},
     "de": {"ORS": "Routenquelle: OpenRouteService", "OSRM": "Routenquelle: OSRM", "DIRECT": "Routenquelle: direkte Linie"},
     "nl": {"ORS": "Routebron: OpenRouteService", "OSRM": "Routebron: OSRM", "DIRECT": "Routebron: rechte lijn"},
+
+    "es": {"ORS": "Fuente de ruta: OpenRouteService", "OSRM": "Fuente de ruta: OSRM", "DIRECT": "Fuente de ruta: línea directa"},
+    "it": {"ORS": "Fonte percorso: OpenRouteService", "OSRM": "Fonte percorso: OSRM", "DIRECT": "Fonte percorso: linea diretta"},
+    "ro": {"ORS": "Sursa rutei: OpenRouteService", "OSRM": "Sursa rutei: OSRM", "DIRECT": "Sursa rutei: linie directă"},
     "ru": {"ORS": "Источник маршрута: OpenRouteService", "OSRM": "Источник маршрута: OSRM", "DIRECT": "Источник маршрута: прямая линия"},
     "lt": {"ORS": "Maršruto šaltinis: OpenRouteService", "OSRM": "Maršruto šaltinis: OSRM", "DIRECT": "Maršruto šaltinis: tiesi linija"},
     "kk": {"ORS": "Маршрут көзі: OpenRouteService", "OSRM": "Маршрут көзі: OSRM", "DIRECT": "Маршрут көзі: түзу сызық"},
@@ -1245,7 +1285,7 @@ def get_status(
     lat: float = Query(...),
     lon: float = Query(...),
     ts: int = Query(..., description="Unix epoch seconds from the device"),
-    lang: str = Query("en", description="Language: en, de, nl, ru"),
+    lang: str = Query("en", description="Language: en, de, nl, es, it, ro, ru, lt, kk, hi, pl, hu, uz, tg, ky, be"),
 ) -> Dict[str, Any]:
     # Enforce geofence, but we do NOT return geofence data anymore
     geofence_check(lat, lon, ts)
@@ -1370,7 +1410,7 @@ def get_route(
     lat: float = Query(...),
     lon: float = Query(...),
     ts: int = Query(..., description="Unix epoch seconds from the device"),
-    lang: str = Query("en", description="Language: en, de, nl, ru"),
+    lang: str = Query("en", description="Language: en, de, nl, es, it, ro, ru, lt, kk, hi, pl, hu, uz, tg, ky, be"),
 ) -> Dict[str, Any]:
     """Return a zoomable route map polyline for the website."""
     geofence_check(lat, lon, ts)
@@ -1409,7 +1449,7 @@ def subscribe(
     lat: float = Query(...),
     lon: float = Query(...),
     ts: int = Query(...),
-    lang: str = Query("en", description="Language: en, de, nl, ru"),
+    lang: str = Query("en", description="Language: en, de, nl, es, it, ro, ru, lt, kk, hi, pl, hu, uz, tg, ky, be"),
     subscription: Dict[str, Any] = Body(...),
 ) -> Dict[str, Any]:
     if not PUSH_ENABLED:
@@ -1595,6 +1635,9 @@ INDEX_HTML = r"""<!doctype html>
         <button class="flagbtn" data-lang="en" title="English" aria-label="English">🇬🇧</button>
         <button class="flagbtn" data-lang="de" title="Deutsch" aria-label="Deutsch">🇩🇪</button>
         <button class="flagbtn" data-lang="nl" title="Nederlands" aria-label="Nederlands">🇳🇱</button>
+        <button class="flagbtn" data-lang="es" title="Español" aria-label="Español">🇪🇸</button>
+        <button class="flagbtn" data-lang="it" title="Italiano" aria-label="Italiano">🇮🇹</button>
+        <button class="flagbtn" data-lang="ro" title="Română" aria-label="Română">🇷🇴</button>
         <button class="flagbtn" data-lang="ru" title="Русский" aria-label="Русский">🇷🇺</button>
         <button class="flagbtn" data-lang="lt" title="Lietuvių" aria-label="Lietuvių">🇱🇹</button>
         <button class="flagbtn" data-lang="kk" title="Қазақша" aria-label="Қазақша">🇰🇿</button>
@@ -1624,7 +1667,7 @@ INDEX_HTML = r"""<!doctype html>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    const API_BASE = window.location.origin;    const SUPPORTED_LANGS = ["en", "de", "nl", "ru", "lt", "kk", "hi", "pl", "hu", "uz", "tg", "ky", "be"];
+    const API_BASE = window.location.origin;    const SUPPORTED_LANGS = ["en", "de", "nl", "es", "it", "ro", "ru", "lt", "kk", "hi", "pl", "hu", "uz", "tg", "ky", "be"];
     const UI = {
       en: {
         title: "Movement status by license plate",
@@ -1748,6 +1791,130 @@ INDEX_HTML = r"""<!doctype html>
         notify_enabled_help: "Je ontvangt een push als je status verandert.",
         subscribe_error: "Abonneerfout",
         route_error: "Routefout"
+      },
+
+      es: {
+        title: "Estado del movimiento por matrícula",
+        plate_ph: "Introduce la matrícula (p. ej. AB-123-CD)",
+        btn_check: "Comprobar",
+        btn_notify: "Activar notificaciones",
+        btn_enabling: "Activando…",
+        btn_enabled: "Notificaciones activadas",
+
+        getting_location: "Obteniendo ubicación…",
+        loading_status: "Cargando estado…",
+        loading_route: "Cargando ruta…",
+
+        no_movement: "No se encontró movimiento",
+        last_refresh: "Última actualización",
+        destination: "Destino",
+        departure_time: "Hora de salida",
+        report_office: "Presentarse en la oficina",
+        trailer: "Remolque",
+        place: "Lugar",
+        route_map: "Mapa de ruta",
+        origin: "Origen",
+        destination_pin: "Destino",
+
+        parking: "Parking",
+        dock: "Muelle",
+
+        err_location: "Error de ubicación",
+        err_network: "Error de red",
+        err_error: "Error",
+        help_location: "Activa el GPS y permite el acceso a la ubicación.",
+
+        notify_not_supported: "Notificaciones no compatibles",
+        notify_not_supported_help: "Usa Chrome/Edge en Android. En iOS hay que añadir el sitio a la pantalla de inicio.",
+        notify_denied: "Notificaciones denegadas",
+        notify_denied_help: "Permite las notificaciones en la configuración del navegador.",
+        notify_failed: "Fallo al suscribirse",
+        notify_enabled_msg: "Notificaciones activadas",
+        notify_enabled_help: "Recibirás un push cuando cambie tu estado.",
+        subscribe_error: "Error de suscripción",
+        route_error: "Error de ruta"
+      },
+      it: {
+        title: "Stato del movimento per targa",
+        plate_ph: "Inserisci la targa (es. AB-123-CD)",
+        btn_check: "Verifica",
+        btn_notify: "Abilita notifiche",
+        btn_enabling: "Abilitazione…",
+        btn_enabled: "Notifiche abilitate",
+
+        getting_location: "Rilevamento posizione…",
+        loading_status: "Caricamento stato…",
+        loading_route: "Caricamento percorso…",
+
+        no_movement: "Nessun movimento trovato",
+        last_refresh: "Ultimo aggiornamento",
+        destination: "Destinazione",
+        departure_time: "Ora di partenza",
+        report_office: "Presentarsi in ufficio",
+        trailer: "Rimorchio",
+        place: "Luogo",
+        route_map: "Mappa percorso",
+        origin: "Origine",
+        destination_pin: "Destinazione",
+
+        parking: "Parcheggio",
+        dock: "Dock",
+
+        err_location: "Errore posizione",
+        err_network: "Errore di rete",
+        err_error: "Errore",
+        help_location: "Attiva il GPS e consenti l'accesso alla posizione.",
+
+        notify_not_supported: "Notifiche non supportate",
+        notify_not_supported_help: "Usa Chrome/Edge su Android. Su iOS aggiungi il sito alla schermata Home.",
+        notify_denied: "Notifiche negate",
+        notify_denied_help: "Consenti le notifiche nelle impostazioni del browser.",
+        notify_failed: "Iscrizione non riuscita",
+        notify_enabled_msg: "Notifiche abilitate",
+        notify_enabled_help: "Riceverai un push quando cambia lo stato.",
+        subscribe_error: "Errore iscrizione",
+        route_error: "Errore percorso"
+      },
+      ro: {
+        title: "Starea mișcării după numărul de înmatriculare",
+        plate_ph: "Introdu numărul (ex. AB-123-CD)",
+        btn_check: "Verifică",
+        btn_notify: "Activează notificări",
+        btn_enabling: "Se activează…",
+        btn_enabled: "Notificări active",
+
+        getting_location: "Se obține locația…",
+        loading_status: "Se încarcă statusul…",
+        loading_route: "Se încarcă ruta…",
+
+        no_movement: "Nu s-a găsit mișcarea",
+        last_refresh: "Ultima actualizare",
+        destination: "Destinație",
+        departure_time: "Ora plecării",
+        report_office: "Prezintă-te la birou",
+        trailer: "Remorcă",
+        place: "Loc",
+        route_map: "Harta rutei",
+        origin: "Origine",
+        destination_pin: "Destinație",
+
+        parking: "Parcare",
+        dock: "Rampă",
+
+        err_location: "Eroare locație",
+        err_network: "Eroare de rețea",
+        err_error: "Eroare",
+        help_location: "Activează GPS-ul și permite accesul la locație.",
+
+        notify_not_supported: "Notificări neacceptate",
+        notify_not_supported_help: "Folosește Chrome/Edge pe Android. Pe iOS trebuie adăugat site-ul pe ecranul principal.",
+        notify_denied: "Notificări refuzate",
+        notify_denied_help: "Permite notificările în setările browserului.",
+        notify_failed: "Abonarea a eșuat",
+        notify_enabled_msg: "Notificări activate",
+        notify_enabled_help: "Vei primi un push când se schimbă statusul.",
+        subscribe_error: "Eroare abonare",
+        route_error: "Eroare rută"
       },
       ru: {
         title: "Статус рейса по номеру",
