@@ -2163,21 +2163,25 @@ INDEX_HTML = r"""<!doctype html>
     };
 
 
-    function normLang(v) {
+    function tryLang(v) {
       try {
         const s0 = String(v || "").trim().toLowerCase().replaceAll("_", "-");
         const base = s0.split("-", 1)[0];
         if (SUPPORTED_LANGS.includes(base)) return base;
         // common aliases
         if (base === "kz" || base === "kaz") return "kk";
-      if (base === "uzb") return "uz";
-      if (base === "tgk" || base === "taj" || base === "tj") return "tg";
-      if (base === "kir" || base === "kg") return "ky";
-      if (base === "bel" || base === "by") return "be";
-        return "en";
+        if (base === "uzb") return "uz";
+        if (base === "tgk" || base === "taj" || base === "tj") return "tg";
+        if (base === "kir" || base === "kg") return "ky";
+        if (base === "bel" || base === "by") return "be";
+        return "";
       } catch (e) {
-        return "en";
+        return "";
       }
+    }
+
+    function normLang(v) {
+      return tryLang(v) || "en";
     }
 
     let CURRENT_LANG = "en";
@@ -2202,31 +2206,52 @@ INDEX_HTML = r"""<!doctype html>
     function getInitialLang() {
       try {
         const l = new URLSearchParams(window.location.search).get("lang") || "";
-        const ln = normLang(l);
+        const ln = tryLang(l);
         if (ln) return ln;
       } catch (e) {}
       try {
         const ls = localStorage.getItem("lang") || "";
-        const ln2 = normLang(ls);
+        const ln2 = tryLang(ls);
         if (ln2) return ln2;
       } catch (e) {}
       try {
+        const list = (navigator.languages && navigator.languages.length) ? navigator.languages : [];
+        for (const cand of list) {
+          const ln3 = tryLang(cand);
+          if (ln3) return ln3;
+        }
+      } catch (e) {}
+      try {
         const nav = (navigator.language || navigator.userLanguage || "") || "";
-        const ln3 = normLang(nav);
-        if (ln3) return ln3;
+        const ln4 = tryLang(nav);
+        if (ln4) return ln4;
       } catch (e) {}
       return "en";
     }
 
-    function setCurrentLang(lang) {
+    function setCurrentLang(lang, opts) {
       const ln = normLang(lang);
+      const changed = (ln !== CURRENT_LANG);
       CURRENT_LANG = ln;
+
       try { localStorage.setItem("lang", ln); } catch (e) {}
+
       try {
         const u = new URL(window.location.href);
         u.searchParams.set("lang", ln);
+
+        // Keep current plate in the URL as well (if user already typed it)
+        const pEl = document.getElementById("plate");
+        const pNow = pEl ? normalizePlate(pEl.value) : "";
+        if (pNow) u.searchParams.set("plate", pNow);
+
+        if (opts && opts.reload && changed) {
+          window.location.replace(u.toString()); // full reload
+          return;
+        }
         history.replaceState(null, "", u.toString());
       } catch (e) {}
+
       try { document.documentElement.lang = ln; } catch (e) {}
       applyLangUI();
       updateLangButtons();
@@ -2598,14 +2623,15 @@ INDEX_HTML = r"""<!doctype html>
 
     // Language buttons
     (function initLang() {
-      setCurrentLang(getInitialLang());
+      setCurrentLang(getInitialLang(), { reload: false });
+
       const bar = document.getElementById("langbar");
       if (bar) {
         bar.addEventListener("click", (ev) => {
           const btn = ev.target && ev.target.closest ? ev.target.closest("button[data-lang]") : null;
           if (!btn) return;
           const l = btn.getAttribute("data-lang") || "en";
-          setCurrentLang(l);
+          setCurrentLang(l, { reload: true });
         });
       }
     })();
