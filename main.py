@@ -882,17 +882,108 @@ def _snapshot_movements() -> List[Dict[str, Any]]:
 
 
 def _get_plate_record(plate: str) -> Optional[Dict[str, Any]]:
+    """Return the best record for a given plate.
+
+    Rule:
+      - A movement becomes INACTIVE if it is departed OR (scheduled_departure + 30 min) has passed.
+      - If multiple movements exist for the same plate, we return the next ACTIVE one (earliest scheduled departure).
+      - If none are active, return the most recent (latest scheduled departure).
+    """
     moves = _snapshot_movements()
     if not moves:
         return None
 
     plate_n = normalize_plate(plate)
     matches = [m for m in moves if normalize_plate(m.get("license_plate", "")) == plate_n]
+    if not matches:
+        return None
     if len(matches) == 1:
         return matches[0]
-    if len(matches) == 0:
-        return None
-    raise HTTPException(status_code=409, detail="Multiple movements found for this plate. Contact the office.")
+
+    # Use a stable local timezone for time-based comparisons (defaults to Europe/Amsterdam).
+    try:
+        from zoneinfo import ZoneInfo  # py3.9+
+        _tz = ZoneInfo((os.environ.get("PORTAL_LOCAL_TZ", "") or "Europe/Amsterdam").strip())
+    except Exception:
+        _tz = None
+
+    def _now_dt() -> datetime:
+        try:
+            return datetime.now(_tz) if _tz else datetime.now()
+        except Exception:
+            return datetime.now()
+
+    def _sched_dt(mv: Dict[str, Any]) -> Optional[datetime]:
+        dt0 = _parse_dt(mv.get("scheduled_departure") or "")
+        if dt0 and _tz and getattr(dt0, "tzinfo", None) is None:
+            try:
+                dt0 = dt0.replace(tzinfo=_tz)
+            except Exception:
+                pass
+        return dt0
+
+    def _is_departed_mv(mv: Dict[str, Any]) -> bool:
+        departed = mv.get("departed", False)
+        if isinstance(departed, str):
+            departed = departed.strip().lower() in {"1", "true", "yes", "y"}
+        if departed:
+            return True
+        if _has(mv.get("departed_at", "")):
+            return True
+        return False
+
+    def _is_inactive_mv(mv: Dict[str, Any]) -> bool:
+        if _is_departed_mv(mv):
+            return True
+        dt0 = _sched_dt(mv)
+        if dt0:
+            try:
+                if _now_dt() > (dt0 + timedelta(minutes=30)):
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def _score_mv(mv: Dict[str, Any]) -> int:
+        s = 0
+        try:
+            if _clean_location_value(mv.get("location", "")):
+                s += 40
+        except Exception:
+            pass
+        if _has(mv.get("close_door", "")):
+            s += 30
+        if _has(mv.get("trailer", "")):
+            s += 10
+        if _has(mv.get("scheduled_departure", "")):
+            s += 5
+        return s
+
+    active = [mv for mv in matches if not _is_inactive_mv(mv)]
+    if active:
+        # Next active: earliest scheduled departure; tie-breaker: more complete row.
+        def _key_active(mv: Dict[str, Any]):
+            dt0 = _sched_dt(mv)
+            ts = dt0.timestamp() if dt0 else float("inf")
+            return (ts, -_score_mv(mv))
+        active.sort(key=_key_active)
+        return active[0]
+
+    # All inactive: return most recent by scheduled departure; tie-breaker: more complete row.
+    def _key_inactive(mv: Dict[str, Any]):
+        dt0 = _sched_dt(mv)
+        ts = dt0.timestamp() if dt0 else float("-inf")
+        return (ts, _score_mv(mv))
+
+    best = None
+    best_key = None
+    for mv in matches:
+        k = _key_inactive(mv)
+        if best_key is None or k > best_key:
+            best_key = k
+            best = mv
+    return best
+
 
 
 def _push_to_plate_localized(plate: str, title_key: str, body_by_lang: Dict[str, str]) -> None:
