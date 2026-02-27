@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Query, Request, Body
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 try:
@@ -1566,6 +1566,20 @@ def subscribe(
     return {"ok": True, "plate": plate_n, "count": len(subs)}
 
 
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    """Serve the browser tab icon.
+
+    Browsers often request /favicon.ico directly (not /static/favicon.ico).
+    Put the icon file here: static/favicon.ico
+    """
+    path = os.path.join(STATIC_DIR, "favicon.ico")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="favicon.ico not found in static/")
+    return FileResponse(path, media_type="image/x-icon")
+
+
 @app.get("/sw.js")
 def sw() -> Response:
     return Response(content=SERVICE_WORKER_JS, media_type="application/javascript")
@@ -1585,7 +1599,13 @@ INDEX_HTML = r"""<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Driver Status</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="icon" href="/static/favicon.ico" type="image/x-icon" />
+
+    <link rel="manifest" href="/static/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
+  <meta name="theme-color" content="#4D148C" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -2926,7 +2946,7 @@ self.addEventListener('push', function(event) {
   let data = {};
   try { data = event.data.json(); } catch (e) { data = { title: 'Update', body: event.data && event.data.text() }; }
   const title = data.title || 'Status update';
-  const options = { body: data.body || '', data: { url: (data.url || '/') } };
+  const options = { body: data.body || '', icon: '/static/icon-192.png', badge: '/static/icon-192.png', data: { url: (data.url || '/') } };
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
