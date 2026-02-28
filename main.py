@@ -152,6 +152,26 @@ MANUAL_STATUS_BY_PLATE: Dict[str, str] = {}
 VIEWED_BY_PLATE: Dict[str, Dict[str, Any]] = {}  # plate -> {count:int, last_view:str}
 STATUS_POLL_INTERVAL_SECONDS = 30
 
+# =============================
+# Developer monitor (in-memory)
+# =============================
+DEV_PLATE = "KLETH743"  # developer window "password" (normalized license plate)
+CHECK_LOG_WINDOW_HOURS = 12
+CHECK_LOG_WINDOW_SECONDS = CHECK_LOG_WINDOW_HOURS * 3600
+
+# List of plate check events in the last ~12 hours (pruned continuously)
+# Each item: {"plate": "AB123CD", "ts": 1700000000, "iso": "2026-02-28T12:34:56Z"}
+CHECK_LOG: List[Dict[str, Any]] = []
+
+# Admin monitor toggle (requires DEV_PLATE in UI; not cryptographically secure)
+ADMIN_NOTIFY_ENABLED: bool = False
+ADMIN_NOTIFY_CHANGED_AT: str = ""
+
+# Simple de-duplication to avoid spamming admin on frequent refreshes
+LAST_ADMIN_CHECK_PUSH_TS_BY_PLATE: Dict[str, float] = {}
+ADMIN_CHECK_PUSH_DEDUP_SECONDS = 60
+
+
 
 # -----------------------------
 # Startup
@@ -183,6 +203,7 @@ async def _startup():
                         if new_key != old_key:
                             LAST_STATUS_KEY_BY_PLATE[plate] = new_key
                             _push_status_change_to_plate(plate, m)
+                            _maybe_admin_push_status_change(plate, m)
             except Exception:
                 pass
             await asyncio.sleep(STATUS_POLL_INTERVAL_SECONDS)
@@ -567,9 +588,9 @@ _I18N_STATUS: Dict[str, Dict[str, str]] = {
 }
 
 _I18N_PUSH_TITLES: Dict[str, Dict[str, str]] = {
-    "en": {"STATUS_UPDATE": "Status update", "MESSAGE_FROM_DISPATCH": "Message from dispatch"},
-    "de": {"STATUS_UPDATE": "Status-Update", "MESSAGE_FROM_DISPATCH": "Nachricht von der Disposition"},
-    "nl": {"STATUS_UPDATE": "Statusupdate", "MESSAGE_FROM_DISPATCH": "Bericht van de planning"},
+    "en": {"STATUS_UPDATE": "Status update", "MESSAGE_FROM_DISPATCH": "Message from dispatch", "ADMIN_MONITOR": "Admin monitor"},
+    "de": {"STATUS_UPDATE": "Status-Update", "MESSAGE_FROM_DISPATCH": "Nachricht von der Disposition", "ADMIN_MONITOR": "Admin Monitor"},
+    "nl": {"STATUS_UPDATE": "Statusupdate", "MESSAGE_FROM_DISPATCH": "Bericht van de planning", "ADMIN_MONITOR": "Admin monitor"},
 
     "es": {"STATUS_UPDATE": "Actualización de estado", "MESSAGE_FROM_DISPATCH": "Mensaje del despacho"},
     "it": {"STATUS_UPDATE": "Aggiornamento stato", "MESSAGE_FROM_DISPATCH": "Messaggio dal dispatch"},
@@ -985,6 +1006,105 @@ def _get_plate_record(plate: str) -> Optional[Dict[str, Any]]:
     return best
 
 
+def _utc_iso_now() -> str:
+    try:
+        return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    except Exception:
+        return datetime.utcnow().isoformat() + "Z"
+
+
+def _prune_check_log(now_ts: Optional[int] = None) -> None:
+    """Keep only the last CHECK_LOG_WINDOW_HOURS hours in CHECK_LOG."""
+    global CHECK_LOG
+    try:
+        now = int(now_ts if now_ts is not None else time.time())
+    except Exception:
+        now = int(time.time())
+
+    cutoff = now - int(CHECK_LOG_WINDOW_SECONDS)
+    try:
+        CHECK_LOG = [r for r in CHECK_LOG if int((r or {}).get("ts", 0)) >= cutoff]
+    except Exception:
+        CHECK_LOG = []
+
+
+def _log_plate_check_event(plate_n: str) -> None:
+    """Record a license plate check event (used by developer monitor)."""
+    if not plate_n:
+        return
+    now_ts = int(time.time())
+    _prune_check_log(now_ts)
+
+    CHECK_LOG.append({
+        "plate": plate_n,
+        "ts": now_ts,
+        "iso": _utc_iso_now(),
+    })
+
+    # Bound memory (should be plenty for 12h window)
+    if len(CHECK_LOG) > 5000:
+        CHECK_LOG[:] = CHECK_LOG[-5000:]
+
+
+def _recent_plate_stats() -> Dict[str, Dict[str, Any]]:
+    """Return per-plate stats for the last 12 hours: count + last check time."""
+    _prune_check_log()
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in CHECK_LOG:
+        try:
+            p = normalize_plate((r or {}).get("plate", ""))
+            if not p:
+                continue
+            ts = int((r or {}).get("ts", 0))
+            iso = str((r or {}).get("iso", "") or "")
+        except Exception:
+            continue
+
+        prev = out.get(p)
+        if not prev:
+            out[p] = {"count": 1, "last_ts": ts, "last_iso": iso}
+            continue
+
+        prev["count"] = int(prev.get("count", 0)) + 1
+        if ts >= int(prev.get("last_ts", 0)):
+            prev["last_ts"] = ts
+            prev["last_iso"] = iso
+
+    return out
+
+
+def _is_plate_recently_checked(plate_n: str) -> bool:
+    """True if plate_n was checked in the last 12 hours."""
+    pn = normalize_plate(plate_n)
+    if not pn:
+        return False
+    _prune_check_log()
+
+    cutoff = int(time.time()) - int(CHECK_LOG_WINDOW_SECONDS)
+    # Walk from newest to oldest for early exit
+    for r in reversed(CHECK_LOG):
+        try:
+            ts = int((r or {}).get("ts", 0))
+            if ts < cutoff:
+                break
+            if normalize_plate((r or {}).get("plate", "")) == pn:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _admin_can_push() -> bool:
+    """Admin monitor push is allowed only if push is configured + toggle ON + admin has a subscription."""
+    if not PUSH_ENABLED:
+        return False
+    if not ADMIN_NOTIFY_ENABLED:
+        return False
+    if not SUBSCRIPTIONS_BY_PLATE.get(DEV_PLATE):
+        return False
+    return True
+
+
 
 def _push_to_plate_localized(plate: str, title_key: str, body_by_lang: Dict[str, str]) -> None:
     """Send localized push to each subscription (best-effort)."""
@@ -1021,6 +1141,111 @@ def _push_to_plate_localized(plate: str, title_key: str, body_by_lang: Dict[str,
             pass
 
     SUBSCRIPTIONS_BY_PLATE[plate] = alive
+
+def _push_admin_event(title_key: str, body_by_lang: Dict[str, str], target_plate: str = "") -> None:
+    """Send a push notification to the admin (DEV_PLATE subscription bucket)."""
+    if not PUSH_ENABLED:
+        return
+    subs = SUBSCRIPTIONS_BY_PLATE.get(DEV_PLATE, []) or []
+    if not subs:
+        return
+
+    vapid_claims = {"sub": VAPID_SUBJECT}
+    alive = []
+
+    for sub in subs:
+        try:
+            lang = normalize_lang((sub or {}).get("lang", "en"))
+            title = push_title_text(title_key, lang)
+            body = body_by_lang.get(lang) or body_by_lang.get("en") or ""
+
+            tp = normalize_plate(target_plate) if target_plate else DEV_PLATE
+            url = f"/?plate={urllib.parse.quote(tp)}&lang={urllib.parse.quote(lang)}"
+
+            payload = json.dumps({
+                "title": title or "Admin",
+                "body": body,
+                "url": url,
+            })
+
+            webpush(
+                subscription_info=sub,
+                data=payload,
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims=vapid_claims,
+            )
+            alive.append(sub)
+        except Exception:
+            pass
+
+    SUBSCRIPTIONS_BY_PLATE[DEV_PLATE] = alive
+
+
+def _maybe_admin_push_plate_checked(plate: str, movement: Optional[Dict[str, Any]] = None) -> None:
+    """If admin monitor is enabled, push when a plate is checked on the website."""
+    if not _admin_can_push():
+        return
+
+    pn = normalize_plate(plate)
+    if not pn or pn == DEV_PLATE:
+        return
+
+    now = float(time.time())
+    last = float(LAST_ADMIN_CHECK_PUSH_TS_BY_PLATE.get(pn, 0.0))
+    if (now - last) < float(ADMIN_CHECK_PUSH_DEDUP_SECONDS):
+        return
+    LAST_ADMIN_CHECK_PUSH_TS_BY_PLATE[pn] = now
+
+    status_text = ""
+    dest_text = "-"
+    sched_disp = "-"
+
+    try:
+        if movement:
+            st = compute_driver_status(movement, lang="en")
+            status_text = str(st.get("status_text", "") or "")
+            dest_text, _, _ = resolve_destination(movement)
+            sched_disp = _format_scheduled_departure(movement.get("scheduled_departure") or "")
+        else:
+            status_text = ""
+    except Exception:
+        pass
+
+    msg = f"Plate checked: {pn}\nStatus: {status_text or '-'}\nDep: {sched_disp or '-'}\nDest: {dest_text or '-'}"
+    bodies = {l: msg for l in SUPPORTED_LANGS}
+    _push_admin_event("ADMIN_MONITOR", bodies, target_plate=pn)
+
+
+def _maybe_admin_push_status_change(plate: str, movement: Dict[str, Any]) -> None:
+    """If admin monitor is enabled, push when a status changes for a recently checked plate."""
+    if not _admin_can_push():
+        return
+    pn = normalize_plate(plate)
+    if not pn or pn == DEV_PLATE:
+        return
+    if not _is_plate_recently_checked(pn):
+        return
+
+    try:
+        st = compute_driver_status(movement, lang="en")
+        status_text = str(st.get("status_text", "") or "")
+    except Exception:
+        status_text = ""
+
+    try:
+        dest_text, _, _ = resolve_destination(movement)
+    except Exception:
+        dest_text = "-"
+
+    try:
+        sched_disp = _format_scheduled_departure(movement.get("scheduled_departure") or "")
+    except Exception:
+        sched_disp = "-"
+
+    msg = f"Status changed: {pn}\nNew: {status_text or '-'}\nDep: {sched_disp or '-'}\nDest: {dest_text or '-'}"
+    bodies = {l: msg for l in SUPPORTED_LANGS}
+    _push_admin_event("ADMIN_MONITOR", bodies, target_plate=pn)
+
 
 
 def _push_status_change_to_plate(plate: str, movement: Dict[str, Any]) -> None:
@@ -1325,6 +1550,7 @@ async def upload_snapshot(request: Request, secret: str = Query(..., min_length=
                 if new_key != old_key:
                     LAST_STATUS_KEY_BY_PLATE[plate] = new_key
                     _push_status_change_to_plate(plate, m)
+                    _maybe_admin_push_status_change(plate, m)
         except Exception:
             pass
 
@@ -1383,6 +1609,13 @@ def get_status(
 
     rec = _get_plate_record(plate)
     if rec is None:
+        try:
+            p0 = normalize_plate(plate)
+            _log_plate_check_event(p0)
+            _maybe_admin_push_plate_checked(p0, None)
+        except Exception:
+            pass
+
         return {
             "plate": normalize_plate(plate),
             "found": False,
@@ -1406,6 +1639,8 @@ def get_status(
             "count": int(prev.get("count", 0)) + 1,
             "last_view": datetime.utcnow().isoformat() + "Z",
         }
+        _log_plate_check_event(p)
+        _maybe_admin_push_plate_checked(p, rec)
     except Exception:
         pass
 
@@ -1451,6 +1686,132 @@ def get_plate_flags(
         }
 
     return {"ok": True, "plates": out}
+
+
+
+@app.get("/api/dev/summary")
+def dev_summary(
+    key: str = Query(..., min_length=3, description="Developer key (DEV_PLATE)"),
+) -> Dict[str, Any]:
+    if normalize_plate(key) != DEV_PLATE:
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
+    _prune_check_log()
+
+    stats = _recent_plate_stats()
+    items: List[Dict[str, Any]] = []
+
+    for plate, s in stats.items():
+        pn = normalize_plate(plate)
+        if not pn:
+            continue
+
+        rec = _get_plate_record(pn)
+        found = bool(rec)
+
+        dest_text = "-"
+        sched_disp = "-"
+        status_text = "-"
+        status_key = ""
+
+        if rec:
+            try:
+                st = compute_driver_status(rec, lang="en")
+                status_text = str(st.get("status_text", "") or "")
+                status_key = str(st.get("status_key", "") or "")
+            except Exception:
+                pass
+
+            try:
+                dest_text, _, _ = resolve_destination(rec)
+            except Exception:
+                dest_text = "-"
+
+            try:
+                sched_disp = _format_scheduled_departure(rec.get("scheduled_departure") or "")
+            except Exception:
+                sched_disp = "-"
+
+        items.append({
+            "plate": pn,
+            "last_check": str(s.get("last_iso", "") or ""),
+            "count_12h": int(s.get("count", 0) or 0),
+            "movement_found": found,
+            "scheduled_departure": sched_disp,
+            "destination_text": dest_text,
+            "status_key": status_key,
+            "status_text": status_text,
+            "bell": bool(SUBSCRIPTIONS_BY_PLATE.get(pn)),
+        })
+
+    # Sort: newest checks first
+    try:
+        items.sort(key=lambda x: x.get("last_check", ""), reverse=True)
+    except Exception:
+        pass
+
+    # Recent raw events (newest first) - useful for debugging
+    try:
+        events = sorted(CHECK_LOG, key=lambda r: int((r or {}).get("ts", 0)), reverse=True)[:200]
+    except Exception:
+        events = []
+
+    return {
+        "ok": True,
+        "dev_plate": DEV_PLATE,
+        "admin_notify_enabled": bool(ADMIN_NOTIFY_ENABLED),
+        "admin_notify_changed_at": str(ADMIN_NOTIFY_CHANGED_AT or ""),
+        "admin_subscribed": bool(SUBSCRIPTIONS_BY_PLATE.get(DEV_PLATE)),
+        "push_enabled": bool(PUSH_ENABLED),
+        "vapid_public_key": VAPID_PUBLIC_KEY if PUSH_ENABLED else "",
+        "items": items,
+        "events": events,
+    }
+
+
+@app.post("/api/dev/admin_notify")
+def dev_set_admin_notify(
+    key: str = Query(..., min_length=3, description="Developer key (DEV_PLATE)"),
+    payload: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    if normalize_plate(key) != DEV_PLATE:
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
+    global ADMIN_NOTIFY_ENABLED, ADMIN_NOTIFY_CHANGED_AT
+    enabled = bool((payload or {}).get("enabled", False))
+
+    ADMIN_NOTIFY_ENABLED = enabled
+    ADMIN_NOTIFY_CHANGED_AT = _utc_iso_now()
+
+    return {"ok": True, "enabled": bool(ADMIN_NOTIFY_ENABLED), "changed_at": ADMIN_NOTIFY_CHANGED_AT}
+
+
+@app.post("/api/dev/subscribe_admin")
+def dev_subscribe_admin(
+    key: str = Query(..., min_length=3, description="Developer key (DEV_PLATE)"),
+    lang: str = Query("en", description="Language for admin push notifications"),
+    subscription: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    if not PUSH_ENABLED:
+        raise HTTPException(status_code=400, detail="Push is not enabled on the server.")
+    if normalize_plate(key) != DEV_PLATE:
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
+    if not isinstance(subscription, dict) or "endpoint" not in subscription:
+        raise HTTPException(status_code=400, detail="Invalid subscription.")
+
+    subs = SUBSCRIPTIONS_BY_PLATE.get(DEV_PLATE, []) or []
+    endpoint = subscription.get("endpoint")
+    subs = [s for s in subs if s.get("endpoint") != endpoint]
+
+    sub_rec = dict(subscription)
+    sub_rec["lang"] = normalize_lang(lang)
+    subs.append(sub_rec)
+
+    SUBSCRIPTIONS_BY_PLATE[DEV_PLATE] = subs
+
+    return {"ok": True, "plate": DEV_PLATE, "count": len(subs)}
+
 
 
 
@@ -1778,7 +2139,9 @@ INDEX_HTML = r"""<!doctype html>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    const API_BASE = window.location.origin;    const SUPPORTED_LANGS = ["en", "de", "nl", "es", "it", "ro", "ru", "lt", "kk", "hi", "pl", "hu", "uz", "tg", "ky", "be"];
+    const API_BASE = window.location.origin;
+    const DEV_PLATE = "KLETH743";
+    const SUPPORTED_LANGS = ["en", "de", "nl", "es", "it", "ro", "ru", "lt", "kk", "hi", "pl", "hu", "uz", "tg", "ky", "be"];
     const UI = {
       en: {
         title: "Movement status by license plate",
@@ -2693,8 +3056,15 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function checkStatus() {
+      stopDeveloperView();
+
       const plate = normalizePlate(document.getElementById("plate").value);
       if (!plate) return;
+
+      if (plate === DEV_PLATE) {
+        showDeveloperView();
+        return;
+      }
 
       setCurrentPlate(plate);
 
@@ -2893,6 +3263,232 @@ INDEX_HTML = r"""<!doctype html>
         if (bn4) { bn4.disabled = false; bn4.textContent = t("btn_notify"); bn4.style.opacity = ""; }
       }
     }
+
+    
+    // -----------------------------
+    // Developer window (DEV_PLATE)
+    // -----------------------------
+    let _devTimer = null;
+
+    function stopDeveloperView() {
+      try {
+        if (_devTimer) clearInterval(_devTimer);
+      } catch (e) {}
+      _devTimer = null;
+    }
+
+    function fmtIso(iso) {
+      try {
+        if (!iso) return "-";
+        const d = new Date(iso);
+        if (!isNaN(d.getTime())) return d.toLocaleString();
+      } catch (e) {}
+      return String(iso || "-");
+    }
+
+    async function fetchDevSummary() {
+      const url = `${API_BASE}/api/dev/summary?key=${encodeURIComponent(DEV_PLATE)}`;
+      const res = await fetch(url);
+      const data = await readJsonOrText(res);
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+      return data;
+    }
+
+    async function setAdminMonitorEnabled(enabled) {
+      const url = `${API_BASE}/api/dev/admin_notify?key=${encodeURIComponent(DEV_PLATE)}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !!enabled }),
+      });
+      const data = await readJsonOrText(res);
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+      return data;
+    }
+
+    async function ensureAdminSubscription(vapidPublicKey) {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        throw new Error(t("notify_not_supported_help"));
+      }
+
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        throw new Error(t("notify_denied_help"));
+      }
+
+      const reg = await navigator.serviceWorker.register('/sw.js');
+
+      const sw = reg.installing || reg.waiting || reg.active;
+      if (!sw) throw new Error("Service Worker registration failed.");
+      await new Promise((resolve, reject) => {
+        if (sw.state === 'activated') return resolve();
+        const tmo = setTimeout(() => reject(new Error("Service Worker activation timeout.")), 8000);
+        sw.addEventListener('statechange', () => {
+          if (sw.state === 'activated') {
+            clearTimeout(tmo);
+            resolve();
+          }
+        });
+      });
+
+      const existing = await reg.pushManager.getSubscription();
+      const sub = existing || await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+      });
+
+      const resp = await fetch(`${API_BASE}/api/dev/subscribe_admin?key=${encodeURIComponent(DEV_PLATE)}&lang=${encodeURIComponent(CURRENT_LANG)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sub),
+      });
+
+      const data = await readJsonOrText(resp);
+      if (!resp.ok) throw new Error(data.detail || resp.statusText);
+      return data;
+    }
+
+    function devRowHtml(it) {
+      const bell = it.bell ? "🔔" : "";
+      const st = (it.status_text || "-");
+      const dest = (it.destination_text || "-");
+      const dep = (it.scheduled_departure || "-");
+      const lc = fmtIso(it.last_check || "");
+      const cnt = (it.count_12h != null) ? String(it.count_12h) : "-";
+      const plate = (it.plate || "-");
+
+      const missing = it.movement_found ? "" : ' <span class="muted">(not found)</span>';
+
+      return `<tr>
+        <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10); white-space:nowrap;"><b>${plate}</b>${missing}</td>
+        <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10); white-space:nowrap;">${lc}</td>
+        <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10); text-align:right;">${cnt}</td>
+        <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10); white-space:nowrap;">${dep}</td>
+        <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10);">${dest}</td>
+        <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10);">${st}</td>
+        <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10); text-align:center;">${bell}</td>
+      </tr>`;
+    }
+
+    function renderDeveloperView(data) {
+      const items = (data && data.items) ? data.items : [];
+      const adminEnabled = !!(data && data.admin_notify_enabled);
+      const adminSubscribed = !!(data && data.admin_subscribed);
+      const pushEnabled = !!(data && data.push_enabled);
+      const vapidKey = (data && data.vapid_public_key) ? String(data.vapid_public_key) : "";
+
+      const btnLabel = adminEnabled ? "Admin notifications: ON" : "Admin notifications: OFF";
+      const btnClass = adminEnabled ? "btn btn-primary" : "btn btn-secondary";
+
+      let adminHint = "";
+      if (!pushEnabled) {
+        adminHint = `<div class="muted" style="margin-top:6px;"><b>Push disabled on server</b> (missing VAPID keys).</div>`;
+      } else if (!adminSubscribed) {
+        adminHint = `<div class="muted" style="margin-top:6px;">Admin is not subscribed yet (click the button to subscribe).</div>`;
+      } else {
+        adminHint = `<div class="muted" style="margin-top:6px;">Admin subscribed: ✅</div>`;
+      }
+
+      const rows = items.length ? items.map(devRowHtml).join("") : `<tr><td colspan="7" class="muted" style="padding:10px;">No checks in the last 12 hours.</td></tr>`;
+
+      show(`
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+          <div>
+            <div class="status-big">Developer monitor</div>
+            <div class="muted">Plates checked in the last 12 hours</div>
+          </div>
+          <div class="row" style="flex:0 0 auto;">
+            <button id="devRefresh" class="btn btn-secondary" style="min-width:120px;">Refresh</button>
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <button id="btnAdminMonitor" class="${btnClass}" style="width:100%;">${btnLabel}</button>
+          ${adminHint}
+          <div id="devMsg" class="muted" style="margin-top:6px; display:none;"></div>
+        </div>
+
+        <div style="margin-top:12px; overflow:auto;">
+          <table style="width:100%; border-collapse:collapse; font-size:14px;">
+            <thead>
+              <tr>
+                <th style="text-align:left; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">Plate</th>
+                <th style="text-align:left; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">Last check</th>
+                <th style="text-align:right; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">#</th>
+                <th style="text-align:left; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">Departure</th>
+                <th style="text-align:left; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">Destination</th>
+                <th style="text-align:left; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">Status</th>
+                <th style="text-align:center; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">🔔</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `, "ok");
+
+      // Hook buttons
+      const rbtn = document.getElementById("devRefresh");
+      if (rbtn) rbtn.onclick = () => refreshDeveloperView();
+
+      const abtn = document.getElementById("btnAdminMonitor");
+      if (abtn) {
+        abtn.onclick = async () => {
+          const devMsg = document.getElementById("devMsg");
+          const setDevMsg = (txt, isErr) => {
+            if (!devMsg) return;
+            devMsg.style.display = txt ? "block" : "none";
+            devMsg.textContent = txt || "";
+            devMsg.style.color = isErr ? "#a00000" : "";
+          };
+
+          try {
+            const turnOn = !adminEnabled;
+
+            if (turnOn) {
+              if (!pushEnabled || !vapidKey) {
+                throw new Error("Push is disabled on server (missing VAPID keys).");
+              }
+              // Ensure admin browser has a subscription
+              if (!adminSubscribed) {
+                setDevMsg("Subscribing admin push…", false);
+                await ensureAdminSubscription(vapidKey);
+              }
+              setDevMsg("Turning admin monitor ON…", false);
+              await setAdminMonitorEnabled(true);
+            } else {
+              setDevMsg("Turning admin monitor OFF…", false);
+              await setAdminMonitorEnabled(false);
+            }
+
+            await refreshDeveloperView();
+            setDevMsg("", false);
+          } catch (e) {
+            setDevMsg(String(e && e.message ? e.message : e), true);
+          }
+        };
+      }
+    }
+
+    async function refreshDeveloperView() {
+      try {
+        const data = await fetchDevSummary();
+        renderDeveloperView(data);
+      } catch (e) {
+        show(`<b>Developer monitor error:</b> ${String(e && e.message ? e.message : e)}`, "err");
+      }
+    }
+
+    function showDeveloperView() {
+      destroyMap();
+      try { document.getElementById("btnNotify").style.display = "none"; } catch (e) {}
+      setNotifyMsg("", "");
+      show(`<div class="muted">Loading developer monitor…</div>`, "ok");
+
+      refreshDeveloperView();
+      stopDeveloperView();
+      _devTimer = setInterval(refreshDeveloperView, 10000);
+    }
+
 
     document.getElementById("btn").addEventListener("click", checkStatus);
     document.getElementById("plate").addEventListener("keydown", (e) => {
