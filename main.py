@@ -56,6 +56,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 #   - DEST_LAND_XLSX: path to dest-land.xlsx / .xlsm
 LOCATIONS_XLSX_ENV = os.environ.get("LOCATIONS_XLSX", "").strip()
 DEST_LAND_XLSX_ENV = os.environ.get("DEST_LAND_XLSX", "").strip()
+HOUSE_RULES_PDF_ENV = os.environ.get("HOUSE_RULES_PDF", "").strip()  # optional override for the house rules PDF
 
 
 def _pick_existing_path(candidates: List[str]) -> str:
@@ -67,6 +68,15 @@ def _pick_existing_path(candidates: List[str]) -> str:
         if p and os.path.exists(p):
             return p
     return first_non_empty
+
+def _house_rules_pdf_path() -> str:
+    """Resolve the PDF path for the on-site house rules / routes document."""
+    return _pick_existing_path([
+        HOUSE_RULES_PDF_ENV,
+        os.path.join(STATIC_DIR, "house_rules.pdf"),
+        os.path.join(BASE_DIR, "house_rules.pdf"),
+    ])
+
 
 
 def _locations_path() -> str:
@@ -150,6 +160,7 @@ LAST_STATUS_KEY_BY_PLATE: Dict[str, str] = {}
 SUBSCRIPTIONS_BY_PLATE: Dict[str, List[Dict[str, Any]]] = {}
 MANUAL_STATUS_BY_PLATE: Dict[str, str] = {}
 VIEWED_BY_PLATE: Dict[str, Dict[str, Any]] = {}  # plate -> {count:int, last_view:str}
+HOUSE_RULES_ACCEPTED_BY_PLATE: Dict[str, str] = {}  # plate -> ISO timestamp (in-memory, resets on restart)
 STATUS_POLL_INTERVAL_SECONDS = 30
 
 # =============================
@@ -405,10 +416,10 @@ def _here_fetch_delay_minutes(
         # but urllib raises HTTPError; keep it simple.
         return None, f"HERE request failed ({type(e).__name__})"
 
-SUPPORTED_LANGS = {"en", "de", "nl", "es", "it", "ro", "ru", "lt", "kk", "hi", "pl", "hu", "uz", "tg", "ky", "be"}
+SUPPORTED_LANGS = {"en", "de", "nl", "fr", "tr", "sv", "es", "it", "ro", "ru", "lt", "kk", "hi", "pl", "hu", "uz", "tg", "ky", "be"}
 
 def normalize_lang(value: Any) -> str:
-    """Return one of: en, de, nl, es, it, ro, ru, lt, kk, hi, pl, hu, uz, tg, ky, be."""
+    """Return one of: en, de, nl, fr, tr, sv, es, it, ro, ru, lt, kk, hi, pl, hu, uz, tg, ky, be."""
     s = str(value or "").strip().lower()
     if not s:
         return "en"
@@ -424,6 +435,12 @@ def normalize_lang(value: Any) -> str:
         return "de"
     if base in {"dut", "nld"}:
         return "nl"
+    if base in {"fre", "fra"}:
+        return "fr"
+    if base in {"tur"}:
+        return "tr"
+    if base in {"swe"}:
+        return "sv"
     if base in {"rus"}:
         return "ru"
     if base in {"lit"}:
@@ -480,6 +497,31 @@ _I18N_STATUS: Dict[str, Dict[str, str]] = {
         "LOADING_WAIT": "Je trailer wordt geladen – even wachten!",
         "REPORT_OFFICE": "Meld je in het kantoor!",
     },
+    "fr": {
+        "DEPARTED": "Bonne route, on vous attend de retour !",
+        "LOCATION_WITH_TRAILER": "Veuillez atteler la remorque {trailer} à l’emplacement : {location} et récupérer les documents CMR au bureau !",
+        "LOCATION_NO_TRAILER": "Veuillez atteler la remorque à l’emplacement : {location} et récupérer les documents CMR au bureau !",
+        "CLOSEDOOR_NO_LOCATION": "Votre remorque est prête. Veuillez vous présenter au bureau pour plus d’informations !",
+        "LOADING_WAIT": "Votre remorque est en cours de chargement — veuillez patienter !",
+        "REPORT_OFFICE": "Veuillez vous présenter au bureau !",
+    },
+    "tr": {
+        "DEPARTED": "İyi yolculuklar, geri dönmenizi bekliyoruz!",
+        "LOCATION_WITH_TRAILER": "Lütfen {location} konumunda {trailer} dorsesini bağlayın ve CMR belgelerini ofisten alın!",
+        "LOCATION_NO_TRAILER": "Lütfen {location} konumunda dorsenizi bağlayın ve CMR belgelerini ofisten alın!",
+        "CLOSEDOOR_NO_LOCATION": "Dorseniz hazır. Daha fazla bilgi için lütfen ofise başvurun!",
+        "LOADING_WAIT": "Dorseniz yükleniyor — lütfen bekleyin!",
+        "REPORT_OFFICE": "Lütfen ofise başvurun!",
+    },
+    "sv": {
+        "DEPARTED": "Kör försiktigt – vi väntar på att du kommer tillbaka!",
+        "LOCATION_WITH_TRAILER": "Koppla släpet {trailer} på plats: {location} och hämta CMR-dokumenten på kontoret!",
+        "LOCATION_NO_TRAILER": "Koppla släpet på plats: {location} och hämta CMR-dokumenten på kontoret!",
+        "CLOSEDOOR_NO_LOCATION": "Ditt släp är klart. Anmäl dig på kontoret för mer information!",
+        "LOADING_WAIT": "Ditt släp lastas — vänligen vänta!",
+        "REPORT_OFFICE": "Anmäl dig på kontoret!",
+    },
+
 
     "es": {
         "DEPARTED": "Buen viaje — ¡te esperamos de vuelta!",
@@ -591,6 +633,10 @@ _I18N_PUSH_TITLES: Dict[str, Dict[str, str]] = {
     "en": {"STATUS_UPDATE": "Status update", "MESSAGE_FROM_DISPATCH": "Message from dispatch", "ADMIN_MONITOR": "Admin monitor"},
     "de": {"STATUS_UPDATE": "Status-Update", "MESSAGE_FROM_DISPATCH": "Nachricht von der Disposition", "ADMIN_MONITOR": "Admin Monitor"},
     "nl": {"STATUS_UPDATE": "Statusupdate", "MESSAGE_FROM_DISPATCH": "Bericht van de planning", "ADMIN_MONITOR": "Admin monitor"},
+    "fr": {"STATUS_UPDATE": "Mise à jour du statut", "MESSAGE_FROM_DISPATCH": "Message de la planification", "ADMIN_MONITOR": "Moniteur admin"},
+    "tr": {"STATUS_UPDATE": "Durum güncellemesi", "MESSAGE_FROM_DISPATCH": "Operasyondan mesaj", "ADMIN_MONITOR": "Yönetici izleme"},
+    "sv": {"STATUS_UPDATE": "Statusuppdatering", "MESSAGE_FROM_DISPATCH": "Meddelande från dispatch", "ADMIN_MONITOR": "Admin-övervakning"},
+
 
     "es": {"STATUS_UPDATE": "Actualización de estado", "MESSAGE_FROM_DISPATCH": "Mensaje del despacho"},
     "it": {"STATUS_UPDATE": "Aggiornamento stato", "MESSAGE_FROM_DISPATCH": "Messaggio dal dispatch"},
@@ -611,6 +657,10 @@ _I18N_ROUTE_NOTE: Dict[str, Dict[str, str]] = {
     "en": {"ORS": "Route source: OpenRouteService", "OSRM": "Route source: OSRM", "DIRECT": "Route source: direct line"},
     "de": {"ORS": "Routenquelle: OpenRouteService", "OSRM": "Routenquelle: OSRM", "DIRECT": "Routenquelle: direkte Linie"},
     "nl": {"ORS": "Routebron: OpenRouteService", "OSRM": "Routebron: OSRM", "DIRECT": "Routebron: rechte lijn"},
+    "fr": {"ORS": "Source d’itinéraire : OpenRouteService", "OSRM": "Source d’itinéraire : OSRM", "DIRECT": "Source d’itinéraire : ligne directe"},
+    "tr": {"ORS": "Rota kaynağı: OpenRouteService", "OSRM": "Rota kaynağı: OSRM", "DIRECT": "Rota kaynağı: doğrudan çizgi"},
+    "sv": {"ORS": "Ruttkälla: OpenRouteService", "OSRM": "Ruttkälla: OSRM", "DIRECT": "Ruttkälla: rak linje"},
+
 
     "es": {"ORS": "Fuente de ruta: OpenRouteService", "OSRM": "Fuente de ruta: OSRM", "DIRECT": "Fuente de ruta: línea directa"},
     "it": {"ORS": "Fonte percorso: OpenRouteService", "OSRM": "Fonte percorso: OSRM", "DIRECT": "Fonte percorso: linea diretta"},
@@ -1602,7 +1652,7 @@ def get_status(
     lat: float = Query(...),
     lon: float = Query(...),
     ts: int = Query(..., description="Unix epoch seconds from the device"),
-    lang: str = Query("en", description="Language: en, de, nl, es, it, ro, ru, lt, kk, hi, pl, hu, uz, tg, ky, be"),
+    lang: str = Query("en", description="Language: en, de, nl, fr, tr, sv, es, it, ro, ru, lt, kk, hi, pl, hu, uz, tg, ky, be"),
 ) -> Dict[str, Any]:
     # Enforce geofence, but we do NOT return geofence data anymore
     geofence_check(lat, lon, ts)
@@ -1619,6 +1669,8 @@ def get_status(
         return {
             "plate": normalize_plate(plate),
             "found": False,
+            "house_rules_accepted": normalize_plate(plate) in HOUSE_RULES_ACCEPTED_BY_PLATE,
+            "house_rules_required": normalize_plate(plate) not in HOUSE_RULES_ACCEPTED_BY_PLATE,
             "last_refresh": (SNAPSHOT or {}).get("last_update"),
         }
 
@@ -1647,6 +1699,8 @@ def get_status(
     return {
         "plate": normalize_plate(plate),
         "found": True,
+        "house_rules_accepted": normalize_plate(plate) in HOUSE_RULES_ACCEPTED_BY_PLATE,
+        "house_rules_required": normalize_plate(plate) not in HOUSE_RULES_ACCEPTED_BY_PLATE,
         "status_key": st["status_key"],
         "status_text": st["status_text"],
         "destination_text": dest_text,
@@ -1659,6 +1713,33 @@ def get_status(
         "push_enabled": PUSH_ENABLED,
         "vapid_public_key": VAPID_PUBLIC_KEY if PUSH_ENABLED else "",
     }
+
+
+
+
+@app.get("/house_rules.pdf")
+def house_rules_pdf() -> Response:
+    p = _house_rules_pdf_path()
+    if not p or not os.path.exists(p):
+        raise HTTPException(
+            status_code=404,
+            detail="House rules PDF not configured. Put it at static/house_rules.pdf or set HOUSE_RULES_PDF.",
+        )
+    return FileResponse(p, media_type="application/pdf", filename="house_rules.pdf")
+
+
+@app.post("/api/house_rules_accept")
+def house_rules_accept(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid payload")
+
+    plate = normalize_plate(payload.get("plate") or "")
+    if len(plate) < 2:
+        raise HTTPException(status_code=400, detail="Invalid plate")
+
+    accepted_at = datetime.utcnow().isoformat() + "Z"
+    HOUSE_RULES_ACCEPTED_BY_PLATE[plate] = accepted_at
+    return {"ok": True, "plate": plate, "accepted_at": accepted_at}
 
 
 @app.get("/api/admin/plate_flags")
@@ -1862,7 +1943,7 @@ def get_route(
     lat: float = Query(...),
     lon: float = Query(...),
     ts: int = Query(..., description="Unix epoch seconds from the device"),
-    lang: str = Query("en", description="Language: en, de, nl, es, it, ro, ru, lt, kk, hi, pl, hu, uz, tg, ky, be"),
+    lang: str = Query("en", description="Language: en, de, nl, fr, tr, sv, es, it, ro, ru, lt, kk, hi, pl, hu, uz, tg, ky, be"),
 ) -> Dict[str, Any]:
     """Return a zoomable route map polyline for the website."""
     geofence_check(lat, lon, ts)
@@ -1901,7 +1982,7 @@ def subscribe(
     lat: float = Query(...),
     lon: float = Query(...),
     ts: int = Query(...),
-    lang: str = Query("en", description="Language: en, de, nl, es, it, ro, ru, lt, kk, hi, pl, hu, uz, tg, ky, be"),
+    lang: str = Query("en", description="Language: en, de, nl, fr, tr, sv, es, it, ro, ru, lt, kk, hi, pl, hu, uz, tg, ky, be"),
     subscription: Dict[str, Any] = Body(...),
 ) -> Dict[str, Any]:
     if not PUSH_ENABLED:
@@ -2097,6 +2178,83 @@ INDEX_HTML = r"""<!doctype html>
       body { background-attachment: scroll; }
     }
     a { color: inherit; }
+  
+    /* House rules modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      z-index: 9999;
+    }
+    .modal {
+      width: min(920px, 100%);
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+      background: rgba(255,255,255,0.95);
+      border-radius: 16px;
+      border: 1px solid rgba(0,0,0,0.12);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    }
+    .modal-header {
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(0,0,0,0.10);
+    }
+    .modal-title { font-size: 18px; font-weight: 700; }
+    .modal-body { padding: 12px 14px 14px; }
+
+    .hr-embed iframe {
+      width: 100%;
+      height: 340px;
+      border: 1px solid rgba(0,0,0,0.15);
+      border-radius: 12px;
+      background: #fff;
+    }
+    .hr-links { margin-top: 8px; }
+    .hr-links a { color: #4D148C; font-weight: 700; text-decoration: none; }
+    .hr-links a:hover { text-decoration: underline; }
+
+    .hr-text {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.65);
+      border: 1px solid rgba(0,0,0,0.08);
+    }
+    .hr-text h3 { margin: 10px 0 6px; font-size: 15px; }
+    .hr-text ul { margin: 6px 0 10px 18px; }
+    .hr-text li { margin: 2px 0; }
+
+    .hr-accept { margin-top: 12px; display: flex; gap: 10px; align-items: center; }
+    .hr-accept-label { font-weight: 700; }
+
+    .switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #bbb;
+      transition: .2s;
+      border-radius: 999px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 22px;
+      width: 22px;
+      left: 3px;
+      top: 3px;
+      background: white;
+      transition: .2s;
+      border-radius: 50%;
+    }
+    .switch input:checked + .slider { background: #4D148C; }
+    .switch input:checked + .slider:before { transform: translateX(22px); }
+
   </style>
 </head>
 <body>
@@ -2107,6 +2265,9 @@ INDEX_HTML = r"""<!doctype html>
         <button class="flagbtn" data-lang="en" title="English" aria-label="English">🇬🇧</button>
         <button class="flagbtn" data-lang="de" title="Deutsch" aria-label="Deutsch">🇩🇪</button>
         <button class="flagbtn" data-lang="nl" title="Nederlands" aria-label="Nederlands">🇳🇱</button>
+        <button class="flagbtn" data-lang="fr" title="Français" aria-label="Français">🇫🇷</button>
+        <button class="flagbtn" data-lang="tr" title="Türkçe" aria-label="Türkçe">🇹🇷</button>
+        <button class="flagbtn" data-lang="sv" title="Svenska" aria-label="Svenska">🇸🇪</button>
         <button class="flagbtn" data-lang="es" title="Español" aria-label="Español">🇪🇸</button>
         <button class="flagbtn" data-lang="it" title="Italiano" aria-label="Italiano">🇮🇹</button>
         <button class="flagbtn" data-lang="ro" title="Română" aria-label="Română">🇷🇴</button>
@@ -2136,12 +2297,45 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
 
+  <!-- House rules / routes modal (shown once per server session per license plate) -->
+  <div id="hrBackdrop" class="modal-backdrop" style="display:none;">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="hrTitle">
+      <div class="modal-header">
+        <div class="modal-title" id="hrTitle">House rules</div>
+      </div>
+      <div class="modal-body">
+        <div id="hrIntro" class="muted" style="margin-bottom:10px;"></div>
+
+        <div class="hr-embed">
+          <iframe id="hrFrame" src="/house_rules.pdf" title="House rules PDF"></iframe>
+          <div class="hr-links">
+            <a id="hrOpenPdf" href="/house_rules.pdf" target="_blank" rel="noopener">Open PDF</a>
+          </div>
+        </div>
+
+        <div id="hrText" class="hr-text"></div>
+
+        <div class="hr-accept">
+          <label class="switch" title="Accept">
+            <input id="hrAccept" type="checkbox" />
+            <span class="slider"></span>
+          </label>
+          <div id="hrAcceptLabel" class="hr-accept-label"></div>
+        </div>
+
+        <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
+          <button id="hrContinue" class="btn btn-primary" disabled>Continue</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
     const API_BASE = window.location.origin;
     const DEV_PLATE = "KLETH743";
-    const SUPPORTED_LANGS = ["en", "de", "nl", "es", "it", "ro", "ru", "lt", "kk", "hi", "pl", "hu", "uz", "tg", "ky", "be"];
+    const SUPPORTED_LANGS = ["en", "de", "nl", "fr", "tr", "sv", "es", "it", "ro", "ru", "lt", "kk", "hi", "pl", "hu", "uz", "tg", "ky", "be"];
     const UI = {
       en: {
         title: "Movement status by license plate",
@@ -2799,7 +2993,131 @@ INDEX_HTML = r"""<!doctype html>
   notify_enabled_help: "Вы атрымаеце push, калі статус зменіцца.",
   subscribe_error: "Памылка падпіскі",
   route_error: "Памылка маршруту"
-}
+},
+
+      fr: {
+        title: "Statut du mouvement par plaque",
+        plate_ph: "Saisir la plaque (ex. AB-123-CD)",
+        btn_check: "Vérifier",
+        btn_notify: "Activer les notifications",
+        btn_enabling: "Activation…",
+        btn_enabled: "Notifications activées",
+
+        getting_location: "Récupération de la position…",
+        loading_status: "Chargement du statut…",
+        loading_route: "Chargement de l’itinéraire…",
+
+        no_movement: "Aucun mouvement trouvé",
+        last_refresh: "Dernière mise à jour",
+        destination: "Destination",
+        departure_time: "Heure de départ",
+        report_office: "Se présenter au bureau",
+        trailer: "Remorque",
+        place: "Emplacement",
+        route_map: "Carte de l’itinéraire",
+        origin: "Départ",
+        destination_pin: "Destination",
+
+        parking: "Parking",
+        dock: "Quai",
+
+        err_location: "Erreur de localisation",
+        err_network: "Erreur réseau",
+        err_error: "Erreur",
+        help_location: "Activez le GPS et autorisez l’accès à la localisation.",
+
+        notify_not_supported: "Notifications non prises en charge",
+        notify_not_supported_help: "Utilisez Chrome/Edge sur Android. Sur iOS, ajoutez le site à l’écran d’accueil.",
+        notify_denied: "Notifications refusées",
+        notify_denied_help: "Autorisez les notifications dans les paramètres du navigateur.",
+        notify_failed: "Échec de l’abonnement",
+        notify_enabled_msg: "Notifications activées",
+        notify_enabled_help: "Vous recevrez une notification push lorsque votre statut change.",
+        subscribe_error: "Erreur d’abonnement",
+        route_error: "Erreur d’itinéraire"
+      },
+      tr: {
+        title: "Plakaya göre hareket durumu",
+        plate_ph: "Plakayı girin (örn. AB-123-CD)",
+        btn_check: "Kontrol et",
+        btn_notify: "Bildirimleri etkinleştir",
+        btn_enabling: "Etkinleştiriliyor…",
+        btn_enabled: "Bildirimler etkin",
+
+        getting_location: "Konum alınıyor…",
+        loading_status: "Durum yükleniyor…",
+        loading_route: "Rota yükleniyor…",
+
+        no_movement: "Hareket bulunamadı",
+        last_refresh: "Son yenileme",
+        destination: "Varış",
+        departure_time: "Çıkış saati",
+        report_office: "Ofise bildirin",
+        trailer: "Dorse",
+        place: "Yer",
+        route_map: "Rota haritası",
+        origin: "Başlangıç",
+        destination_pin: "Varış",
+
+        parking: "Park",
+        dock: "Kapı",
+
+        err_location: "Konum hatası",
+        err_network: "Ağ hatası",
+        err_error: "Hata",
+        help_location: "GPS’i açın ve konum izni verin.",
+
+        notify_not_supported: "Bildirimler desteklenmiyor",
+        notify_not_supported_help: "Android’de Chrome/Edge kullanın. iOS’ta siteyi Ana Ekran’a eklemek gerekir.",
+        notify_denied: "Bildirimler engellendi",
+        notify_denied_help: "Tarayıcı ayarlarından bildirimlere izin verin.",
+        notify_failed: "Abonelik başarısız",
+        notify_enabled_msg: "Bildirimler etkin",
+        notify_enabled_help: "Durumunuz değiştiğinde push bildirimi alacaksınız.",
+        subscribe_error: "Abonelik hatası",
+        route_error: "Rota hatası"
+      },
+      sv: {
+        title: "Rörelsestatus per registreringsnummer",
+        plate_ph: "Ange registreringsnummer (t.ex. AB-123-CD)",
+        btn_check: "Kontrollera",
+        btn_notify: "Aktivera aviseringar",
+        btn_enabling: "Aktiverar…",
+        btn_enabled: "Aviseringar aktiverade",
+
+        getting_location: "Hämtar position…",
+        loading_status: "Laddar status…",
+        loading_route: "Laddar rutt…",
+
+        no_movement: "Ingen rörelse hittades",
+        last_refresh: "Senast uppdaterad",
+        destination: "Destination",
+        departure_time: "Avgångstid",
+        report_office: "Anmäl dig på kontoret",
+        trailer: "Släp",
+        place: "Plats",
+        route_map: "Ruttkarta",
+        origin: "Start",
+        destination_pin: "Destination",
+
+        parking: "Parkering",
+        dock: "Port",
+
+        err_location: "Positionsfel",
+        err_network: "Nätverksfel",
+        err_error: "Fel",
+        help_location: "Aktivera GPS och tillåt platsbehörighet.",
+
+        notify_not_supported: "Aviseringar stöds inte",
+        notify_not_supported_help: "Använd Chrome/Edge på Android. iOS kräver att du lägger till sidan på hemskärmen.",
+        notify_denied: "Aviseringar nekade",
+        notify_denied_help: "Tillåt aviseringar i webbläsarens inställningar.",
+        notify_failed: "Prenumeration misslyckades",
+        notify_enabled_msg: "Aviseringar aktiverade",
+        notify_enabled_help: "Du får en push-notis när din status ändras.",
+        subscribe_error: "Prenumerationsfel",
+        route_error: "Ruttfel"
+      }
 
     };
 
@@ -2815,6 +3133,9 @@ INDEX_HTML = r"""<!doctype html>
         if (base === "tgk" || base === "taj" || base === "tj") return "tg";
         if (base === "kir" || base === "kg") return "ky";
         if (base === "bel" || base === "by") return "be";
+                if (base === "fre" || base === "fra") return "fr";
+        if (base === "tur") return "tr";
+        if (base === "swe") return "sv";
         return "";
       } catch (e) {
         return "";
@@ -2826,6 +3147,961 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     let CURRENT_LANG = "en";
+
+    const HOUSE_RULES = {
+      en: {
+        title: "QAR Duiven | Driving and Walking Routes",
+        intro: "Please read the site map and safety rules. You must accept the house rules to continue.",
+        accept: "I accept the house rules",
+        cont: "Continue",
+        open_pdf: "Open PDF in a new tab",
+        html: `<h3>Site map – key locations</h3>
+<ul>
+  <li><b>Offices/driver facilities</b>: A – Gatehouse / driver lounge; B – Driver briefing &amp; paperwork office</li>
+  <li><b>Parking areas</b>: C – Driver rest parking; D – Trailer parking; E – Relay parking → truck trailers; F – Relay parking → solo trucks; G – Visitor parking</li>
+  <li><b>Pedestrians</b>: H – Entry to driver lounge; I – Stairs to office walkway; J – Pedestrian gate to office</li>
+  <li><b>Barrier gates</b>: K – Truck entrance barrier; L – Exit yard to driver parking; M – Entry to yard from driver area; N – Visitor parking barrier; O – Truck exit barrier</li>
+</ul>
+
+<h3>DRIVING – enter/exit the driver rest parking area</h3>
+<ul>
+  <li>After passing the gatehouse (A), drive straight to the driver rest parking area (C).</li>
+  <li>Enter the driver rest parking area through the barrier gate (L).</li>
+  <li>Go through the barrier gate (M) to exit the driver rest parking area and access the yard.</li>
+</ul>
+
+<h3>WALKING</h3>
+<ul>
+  <li><b>From the driver lounge to the office</b>: take the stairs (I) from the driver lounge (A) to the walkway, walk along the fence and follow the signs, then pass through gate (J) to reach the briefing office (B).</li>
+  <li><b>From the relay parking area to the office</b>: walk along the path with green markings next to the fence, continue straight, then pass through gate (J) to reach the briefing office (B).</li>
+</ul>
+
+<h3>In case of emergency</h3>
+<ul>
+  <li>Stay calm.</li>
+  <li>Call <b>112</b> first.</li>
+  <li>Call FedEx security: <b>0316 799 476</b>.</li>
+  <li>In case of fire or a fire alarm: leave via the nearest emergency exit and go to the assembly point.</li>
+</ul>
+
+<h3>Site safety rules</h3>
+<ul>
+  <li>Speed limit on site: <b>15 km/h</b>.</li>
+  <li>One-way traffic on the yard.</li>
+  <li>Walk only on designated pedestrian paths.</li>
+  <li>Wear a closed high-visibility safety vest and safety shoes (class S3) on the yard.</li>
+  <li>Use appropriate safety equipment when docking or handling trailers.</li>
+  <li>Always follow local site rules and the instructions of security personnel and shunters.</li>
+</ul>
+<div class="muted">For full site rules, see the FedEx Duiven–QAR site yard rules leaflet (available at the gatehouse and the office).</div>`
+      },
+      de: {
+        title: "QAR Duiven | Fahr- und Fußwege",
+        intro: "Bitte lesen Sie den Lageplan und die Sicherheitsregeln. Sie müssen die Hofregeln akzeptieren, um fortzufahren.",
+        accept: "Ich akzeptiere die Hofregeln",
+        cont: "Weiter",
+        open_pdf: "PDF in neuem Tab öffnen",
+        html: `<h3>Lageplan – wichtige Orte</h3>
+<ul>
+  <li><b>Büros/Fahrerbereiche</b>: A – Pförtnerhaus / Fahrerlounge; B – Fahrerbriefing &amp; Büro für Papiere</li>
+  <li><b>Parkflächen</b>: C – Fahrer-Ruheparkplatz; D – Trailer-Parkplatz; E – Relay-Parkplatz → Lkw mit Trailern; F – Relay-Parkplatz → Solo-Trucks; G – Besucherparkplatz</li>
+  <li><b>Fußgänger</b>: H – Eingang Fahrerlounge; I – Treppe zum Fußweg Richtung Büro; J – Fußgängertor zum Büro</li>
+  <li><b>Schranken</b>: K – Lkw-Einfahrtsschranke; L – Ausfahrt Hof zum Fahrerparkplatz; M – Einfahrt Hof vom Fahrerbereich; N – Schranke Besucherparkplatz; O – Lkw-Ausfahrtsschranke</li>
+</ul>
+
+<h3>FAHREN – Ein-/Ausfahrt Fahrer-Ruheparkplatz</h3>
+<ul>
+  <li>Nach dem Pförtnerhaus (A) geradeaus zum Fahrer-Ruheparkplatz (C) fahren.</li>
+  <li>Durch die Schranke (L) in den Fahrer-Ruheparkplatz einfahren.</li>
+  <li>Durch die Schranke (M) ausfahren, um den Hof zu erreichen.</li>
+</ul>
+
+<h3>ZU FUß</h3>
+<ul>
+  <li><b>Von der Fahrerlounge zum Büro</b>: über die Treppe (I) von der Lounge (A) auf den Fußweg, am Zaun entlanggehen, Beschilderung folgen und durch Tor (J) zum Briefingbüro (B).</li>
+  <li><b>Vom Relay-Parkplatz zum Büro</b>: dem Weg mit grünen Markierungen am Zaun folgen, geradeaus weiter und durch Tor (J) zum Briefingbüro (B).</li>
+</ul>
+
+<h3>Im Notfall</h3>
+<ul>
+  <li>Ruhig bleiben.</li>
+  <li>Zuerst <b>112</b> anrufen.</li>
+  <li>FedEx Security anrufen: <b>0316 799 476</b>.</li>
+  <li>Bei Feuer oder Feueralarm: über den nächsten Notausgang verlassen und zum Sammelplatz gehen.</li>
+</ul>
+
+<h3>Sicherheitsregeln auf dem Gelände</h3>
+<ul>
+  <li>Höchstgeschwindigkeit: <b>15 km/h</b>.</li>
+  <li>Einbahnverkehr auf dem Hof.</li>
+  <li>Nur auf ausgewiesenen Fußwegen gehen.</li>
+  <li>Auf dem Hof geschlossene Warnweste und Sicherheitsschuhe (Klasse S3) tragen.</li>
+  <li>Beim Andocken/Handling von Trailern geeignete Schutzausrüstung verwenden.</li>
+  <li>Lokale Regeln sowie Anweisungen von Security und Rangierern immer befolgen.</li>
+</ul>
+<div class="muted">Vollständige Regeln: „FedEx Duiven–QAR site yard rules“ (erhältlich am Pförtnerhaus und im Büro).</div>`
+      },
+      nl: {
+        title: "QAR Duiven | Rij- en looproutes",
+        intro: "Lees de plattegrond en veiligheidsregels. Je moet de huisregels accepteren om verder te gaan.",
+        accept: "Ik accepteer de huisregels",
+        cont: "Doorgaan",
+        open_pdf: "PDF openen in een nieuw tabblad",
+        html: `<h3>Plattegrond – belangrijke locaties</h3>
+<ul>
+  <li><b>Kantoren/chauffeursfaciliteiten</b>: A – Poortgebouw / chauffeurslounge; B – Chauffeursbriefing &amp; papierwerk-kantoor</li>
+  <li><b>Parkeerplaatsen</b>: C – Rustparking chauffeurs; D – Trailerparking; E – Relay parking → trucks met trailers; F – Relay parking → solo trucks; G – Bezoekersparking</li>
+  <li><b>Voetgangers</b>: H – Ingang chauffeurslounge; I – Trap naar looproute richting kantoor; J – Voetgangerspoort naar kantoor</li>
+  <li><b>Slagbomen</b>: K – Slagboom truck-ingang; L – Uitrit terrein naar chauffeursparking; M – Inrit terrein vanaf chauffeursgebied; N – Slagboom bezoekersparking; O – Slagboom truck-uitgang</li>
+</ul>
+
+<h3>RIJDEN – in-/uitrijden rustparking chauffeurs</h3>
+<ul>
+  <li>Na het poortgebouw (A) rechtdoor naar de rustparking (C).</li>
+  <li>Rijd via de slagboom (L) de rustparking binnen.</li>
+  <li>Ga via de slagboom (M) naar buiten om het terrein op te rijden.</li>
+</ul>
+
+<h3>LOPEN</h3>
+<ul>
+  <li><b>Van de lounge naar het kantoor</b>: neem de trap (I) vanuit de lounge (A) naar de looproute, loop langs het hek en volg de borden, ga daarna door poort (J) naar het briefingkantoor (B).</li>
+  <li><b>Van de relay parking naar het kantoor</b>: volg het pad met groene markeringen langs het hek, ga rechtdoor en ga door poort (J) naar het briefingkantoor (B).</li>
+</ul>
+
+<h3>In geval van nood</h3>
+<ul>
+  <li>Blijf kalm.</li>
+  <li>Bel eerst <b>112</b>.</li>
+  <li>Bel FedEx security: <b>0316 799 476</b>.</li>
+  <li>Bij brand of brandalarm: via de dichtstbijzijnde nooduitgang naar buiten en naar het verzamelpunt.</li>
+</ul>
+
+<h3>Veiligheidsregels op het terrein</h3>
+<ul>
+  <li>Snelheidslimiet: <b>15 km/u</b>.</li>
+  <li>Eenrichtingsverkeer op het terrein.</li>
+  <li>Loop alleen op aangewezen voetpaden.</li>
+  <li>Draag een gesloten veiligheidsvest (hi-vis) en veiligheidsschoenen (klasse S3) op het terrein.</li>
+  <li>Gebruik passende veiligheidsmiddelen bij het docken of verplaatsen van trailers.</li>
+  <li>Volg altijd de lokale regels en instructies van security en shunters.</li>
+</ul>
+<div class="muted">Voor volledige regels: FedEx Duiven–QAR terreinregels leaflet (verkrijgbaar bij het poortgebouw en het kantoor).</div>`
+      },
+      fr: {
+        title: "QAR Duiven | Itinéraires en véhicule et à pied",
+        intro: "Veuillez lire le plan du site et les règles de sécurité. Vous devez accepter le règlement intérieur pour continuer.",
+        accept: "J’accepte le règlement intérieur",
+        cont: "Continuer",
+        open_pdf: "Ouvrir le PDF dans un nouvel onglet",
+        html: `<h3>Plan du site – lieux clés</h3>
+<ul>
+  <li><b>Bureaux / installations chauffeurs</b> : A – Poste de garde / lounge chauffeurs ; B – Briefing chauffeurs &amp; bureau des documents</li>
+  <li><b>Zones de parking</b> : C – Parking repos chauffeurs ; D – Parking remorques ; E – Parking relais → tracteurs + remorques ; F – Parking relais → tracteurs seuls ; G – Parking visiteurs</li>
+  <li><b>Piétons</b> : H – Entrée lounge chauffeurs ; I – Escaliers vers la passerelle du bureau ; J – Portillon piéton vers le bureau</li>
+  <li><b>Barrières</b> : K – Barrière entrée camions ; L – Sortie cour vers parking chauffeurs ; M – Entrée cour depuis zone chauffeurs ; N – Barrière parking visiteurs ; O – Barrière sortie camions</li>
+</ul>
+
+<h3>CONDUITE – entrer/sortir du parking repos chauffeurs</h3>
+<ul>
+  <li>Après le poste de garde (A), roulez tout droit jusqu’au parking repos chauffeurs (C).</li>
+  <li>Entrez dans le parking repos chauffeurs via la barrière (L).</li>
+  <li>Passez la barrière (M) pour sortir du parking repos et accéder à la cour.</li>
+</ul>
+
+<h3>À PIED</h3>
+<ul>
+  <li><b>Du lounge au bureau</b> : prenez les escaliers (I) depuis le lounge (A) vers la passerelle, marchez le long de la clôture et suivez la signalisation, puis passez le portillon (J) pour atteindre le bureau de briefing (B).</li>
+  <li><b>Du parking relais au bureau</b> : suivez le chemin avec les marquages verts le long de la clôture, continuez tout droit, puis passez le portillon (J) pour atteindre le bureau de briefing (B).</li>
+</ul>
+
+<h3>En cas d’urgence</h3>
+<ul>
+  <li>Restez calme.</li>
+  <li>Appelez d’abord le <b>112</b>.</li>
+  <li>Appelez la sécurité FedEx : <b>0316 799 476</b>.</li>
+  <li>En cas d’incendie ou d’alarme incendie : sortez par l’issue de secours la plus proche et rendez-vous au point de rassemblement.</li>
+</ul>
+
+<h3>Règles de sécurité sur site</h3>
+<ul>
+  <li>Limite de vitesse : <b>15 km/h</b>.</li>
+  <li>Circulation à sens unique dans la cour.</li>
+  <li>Marchez uniquement sur les cheminements piétons dédiés.</li>
+  <li>Portez un gilet haute visibilité fermé et des chaussures de sécurité (classe S3) dans la cour.</li>
+  <li>Utilisez l’équipement de sécurité approprié lors de l’accostage/manutention des remorques.</li>
+  <li>Respectez toujours les règles locales et les consignes du personnel de sécurité et des shunters.</li>
+</ul>
+<div class="muted">Pour les règles complètes, consultez la brochure « FedEx Duiven–QAR site yard rules » (disponible au poste de garde et au bureau).</div>`
+      },
+      tr: {
+        title: "QAR Duiven | Araç ve Yaya Güzergâhları",
+        intro: "Lütfen saha haritasını ve güvenlik kurallarını okuyun. Devam etmek için tesis kurallarını kabul etmelisiniz.",
+        accept: "Tesis kurallarını kabul ediyorum",
+        cont: "Devam",
+        open_pdf: "PDF’yi yeni sekmede aç",
+        html: `<h3>Saha haritası – önemli noktalar</h3>
+<ul>
+  <li><b>Ofisler/şoför alanları</b>: A – Güvenlik kulübesi / şoför dinlenme alanı; B – Şoför brifingi &amp; evrak ofisi</li>
+  <li><b>Park alanları</b>: C – Şoför dinlenme parkı; D – Dorse parkı; E – Röle parkı → dorse bağlı çekiciler; F – Röle parkı → solo çekiciler; G – Ziyaretçi parkı</li>
+  <li><b>Yaya</b>: H – Şoför alanına giriş; I – Ofise giden yürüyüş yoluna merdiven; J – Ofise yaya kapısı</li>
+  <li><b>Bariyer kapıları</b>: K – Kamyon giriş bariyeri; L – Saha çıkışı → şoför parkı; M – Şoför alanından sahaya giriş; N – Ziyaretçi parkı bariyeri; O – Kamyon çıkış bariyeri</li>
+</ul>
+
+<h3>SÜRÜŞ – şoför dinlenme parkına giriş/çıkış</h3>
+<ul>
+  <li>Güvenlik kulübesini (A) geçtikten sonra düz devam edip şoför dinlenme parkına (C) gidin.</li>
+  <li>Bariyer kapısından (L) geçerek dinlenme parkına girin.</li>
+  <li>Dinlenme parkından çıkıp sahaya erişmek için bariyer kapısından (M) geçin.</li>
+</ul>
+
+<h3>YÜRÜYÜŞ</h3>
+<ul>
+  <li><b>Şoför alanından ofise</b>: şoför alanından (A) merdivenleri (I) kullanarak yürüyüş yoluna çıkın, çit boyunca ilerleyip tabelaları takip edin, ardından kapıdan (J) geçerek brifing ofisine (B) ulaşın.</li>
+  <li><b>Röle parkından ofise</b>: çitin yanındaki yeşil işaretli yolu takip edin, düz devam edin, ardından kapıdan (J) geçerek brifing ofisine (B) ulaşın.</li>
+</ul>
+
+<h3>Acil durumda</h3>
+<ul>
+  <li>Sakin olun.</li>
+  <li>Önce <b>112</b>’yi arayın.</li>
+  <li>FedEx güvenliğini arayın: <b>0316 799 476</b>.</li>
+  <li>Yangın veya yangın alarmında: en yakın acil çıkıştan çıkın ve toplanma noktasına gidin.</li>
+</ul>
+
+<h3>Saha güvenlik kuralları</h3>
+<ul>
+  <li>Hız limiti: <b>15 km/sa</b>.</li>
+  <li>Sahada tek yön trafik vardır.</li>
+  <li>Sadece belirlenmiş yaya yollarını kullanın.</li>
+  <li>Sahada kapalı reflektörlü yelek ve güvenlik ayakkabısı (S3) giyin.</li>
+  <li>Dorseleri yanaştırırken/taşırken uygun güvenlik ekipmanı kullanın.</li>
+  <li>Yerel kurallara ve güvenlik personeli ile shunter talimatlarına her zaman uyun.</li>
+</ul>
+<div class="muted">Tüm kurallar için: FedEx Duiven–QAR saha kuralları broşürü (güvenlik kulübesi ve ofiste mevcut).</div>`
+      },
+      sv: {
+        title: "QAR Duiven | Kör- och gångvägar",
+        intro: "Läs kartan och säkerhetsreglerna. Du måste godkänna platsreglerna för att fortsätta.",
+        accept: "Jag godkänner platsreglerna",
+        cont: "Fortsätt",
+        open_pdf: "Öppna PDF i ny flik",
+        html: `<h3>Karta – viktiga platser</h3>
+<ul>
+  <li><b>Kontor/förarfaciliteter</b>: A – Vakthus / förarlounge; B – Förarbriefing &amp; kontor för dokument</li>
+  <li><b>Parkeringsområden</b>: C – Förarviloparkering; D – Släpparkering; E – Relay-parkering → dragbil + släp; F – Relay-parkering → enbart dragbil; G – Besöksparkering</li>
+  <li><b>Gående</b>: H – Ingång till förarlounge; I – Trappor till gångvägen mot kontoret; J – Gånggrind till kontoret</li>
+  <li><b>Bommar</b>: K – Bom vid lastbilsinfart; L – Utfart gård → förarparkering; M – Infart gård från förarområdet; N – Bom vid besöksparkering; O – Bom vid lastbilsutfart</li>
+</ul>
+
+<h3>KÖRNING – in/ut från förarviloparkeringen</h3>
+<ul>
+  <li>Efter vakthuset (A), kör rakt fram till förarviloparkeringen (C).</li>
+  <li>Kör in på förarviloparkeringen via bommen (L).</li>
+  <li>Passera bommen (M) för att lämna förarviloparkeringen och komma ut på gården.</li>
+</ul>
+
+<h3>GÅNG</h3>
+<ul>
+  <li><b>Från loungen till kontoret</b>: ta trapporna (I) från loungen (A) till gångvägen, gå längs stängslet och följ skyltarna, passera sedan grinden (J) till briefingkontoret (B).</li>
+  <li><b>Från relay-parkeringen till kontoret</b>: följ vägen med gröna markeringar längs stängslet, fortsätt rakt fram och passera grinden (J) till briefingkontoret (B).</li>
+</ul>
+
+<h3>Vid nödsituation</h3>
+<ul>
+  <li>Behåll lugnet.</li>
+  <li>Ring först <b>112</b>.</li>
+  <li>Ring FedEx säkerhet: <b>0316 799 476</b>.</li>
+  <li>Vid brand eller brandlarm: lämna via närmaste nödutgång och gå till återsamlingsplatsen.</li>
+</ul>
+
+<h3>Säkerhetsregler på området</h3>
+<ul>
+  <li>Hastighetsgräns: <b>15 km/h</b>.</li>
+  <li>Enkelriktad trafik på gården.</li>
+  <li>Gå endast på markerade gångvägar.</li>
+  <li>Använd stängd varselväst och skyddsskor (klass S3) på gården.</li>
+  <li>Använd lämplig skyddsutrustning vid dockning eller hantering av släp.</li>
+  <li>Följ alltid lokala regler och instruktioner från säkerhetspersonal och shunters.</li>
+</ul>
+<div class="muted">För fullständiga regler: FedEx Duiven–QAR område-regler (broschyr finns vid vakthuset och kontoret).</div>`
+      },
+      es: {
+        title: "QAR Duiven | Rutas de conducción y a pie",
+        intro: "Lea el plano del sitio y las normas de seguridad. Debe aceptar las normas del sitio para continuar.",
+        accept: "Acepto las normas del sitio",
+        cont: "Continuar",
+        open_pdf: "Abrir PDF en una pestaña nueva",
+        html: `<h3>Mapa del sitio – ubicaciones clave</h3>
+<ul>
+  <li><b>Oficinas/instalaciones para conductores</b>: A – Garita / sala de conductores; B – Oficina de briefing y documentación</li>
+  <li><b>Zonas de aparcamiento</b>: C – Aparcamiento de descanso; D – Aparcamiento de remolques; E – Aparcamiento relay → camión con remolque; F – Aparcamiento relay → camión solo; G – Aparcamiento de visitantes</li>
+  <li><b>Peatones</b>: H – Entrada a la sala; I – Escaleras a la pasarela hacia la oficina; J – Puerta peatonal a la oficina</li>
+  <li><b>Barreras</b>: K – Barrera de entrada camiones; L – Salida del patio al aparcamiento de conductores; M – Entrada al patio desde zona de conductores; N – Barrera de visitantes; O – Barrera de salida camiones</li>
+</ul>
+
+<h3>CONDUCCIÓN – entrar/salir del aparcamiento de descanso</h3>
+<ul>
+  <li>Después de la garita (A), conduzca recto hasta el aparcamiento de descanso (C).</li>
+  <li>Entre al aparcamiento de descanso por la barrera (L).</li>
+  <li>Pase por la barrera (M) para salir del aparcamiento de descanso y acceder al patio.</li>
+</ul>
+
+<h3>A PIE</h3>
+<ul>
+  <li><b>De la sala a la oficina</b>: use las escaleras (I) desde la sala (A) hacia la pasarela, camine junto a la valla y siga las señales, luego pase por la puerta (J) para llegar a la oficina de briefing (B).</li>
+  <li><b>Del aparcamiento relay a la oficina</b>: siga el camino con marcas verdes junto a la valla, continúe recto y pase por la puerta (J) para llegar a la oficina de briefing (B).</li>
+</ul>
+
+<h3>En caso de emergencia</h3>
+<ul>
+  <li>Mantenga la calma.</li>
+  <li>Llame primero al <b>112</b>.</li>
+  <li>Llame a seguridad de FedEx: <b>0316 799 476</b>.</li>
+  <li>En caso de incendio o alarma: salga por la salida de emergencia más cercana y vaya al punto de reunión.</li>
+</ul>
+
+<h3>Normas de seguridad del sitio</h3>
+<ul>
+  <li>Límite de velocidad: <b>15 km/h</b>.</li>
+  <li>Tráfico de sentido único en el patio.</li>
+  <li>Caminar solo por los caminos peatonales señalizados.</li>
+  <li>Use chaleco de alta visibilidad cerrado y calzado de seguridad (clase S3) en el patio.</li>
+  <li>Use el equipo de seguridad adecuado al acoplar o manipular remolques.</li>
+  <li>Siga siempre las normas locales y las instrucciones del personal de seguridad y shunters.</li>
+</ul>
+<div class="muted">Para las normas completas, consulte el folleto de reglas del patio FedEx Duiven–QAR (disponible en la garita y la oficina).</div>`
+      },
+      it: {
+        title: "QAR Duiven | Percorsi di guida e a piedi",
+        intro: "Leggi la mappa del sito e le regole di sicurezza. Devi accettare il regolamento per continuare.",
+        accept: "Accetto il regolamento del sito",
+        cont: "Continua",
+        open_pdf: "Apri il PDF in una nuova scheda",
+        html: `<h3>Mappa del sito – posizioni chiave</h3>
+<ul>
+  <li><b>Uffici/servizi autisti</b>: A – Guardhouse / lounge autisti; B – Briefing autisti &amp; ufficio documenti</li>
+  <li><b>Aree di parcheggio</b>: C – Parcheggio riposo autisti; D – Parcheggio rimorchi; E – Parcheggio relay → camion con rimorchio; F – Parcheggio relay → camion solo; G – Parcheggio visitatori</li>
+  <li><b>Pedoni</b>: H – Ingresso lounge; I – Scale verso la passerella per l’ufficio; J – Cancello pedonale per l’ufficio</li>
+  <li><b>Barriere</b>: K – Barriera ingresso camion; L – Uscita cortile verso parcheggio autisti; M – Ingresso cortile dall’area autisti; N – Barriera parcheggio visitatori; O – Barriera uscita camion</li>
+</ul>
+
+<h3>GUIDA – entrare/uscire dal parcheggio riposo autisti</h3>
+<ul>
+  <li>Dopo la guardhouse (A), prosegui dritto fino al parcheggio riposo (C).</li>
+  <li>Entra nel parcheggio riposo passando dalla barriera (L).</li>
+  <li>Passa la barriera (M) per uscire dal parcheggio riposo e accedere al cortile.</li>
+</ul>
+
+<h3>A PIEDI</h3>
+<ul>
+  <li><b>Dalla lounge all’ufficio</b>: usa le scale (I) dalla lounge (A) alla passerella, cammina lungo la recinzione seguendo i cartelli, poi attraversa il cancello (J) per arrivare all’ufficio briefing (B).</li>
+  <li><b>Dal parcheggio relay all’ufficio</b>: segui il percorso con segnaletica verde lungo la recinzione, continua dritto e attraversa il cancello (J) per arrivare all’ufficio briefing (B).</li>
+</ul>
+
+<h3>In caso di emergenza</h3>
+<ul>
+  <li>Mantieni la calma.</li>
+  <li>Chiama prima il <b>112</b>.</li>
+  <li>Chiama la sicurezza FedEx: <b>0316 799 476</b>.</li>
+  <li>In caso di incendio o allarme: esci dall’uscita di emergenza più vicina e raggiungi il punto di raccolta.</li>
+</ul>
+
+<h3>Regole di sicurezza del sito</h3>
+<ul>
+  <li>Limite di velocità: <b>15 km/h</b>.</li>
+  <li>Traffico a senso unico nel cortile.</li>
+  <li>Cammina solo sui percorsi pedonali dedicati.</li>
+  <li>Indossa gilet ad alta visibilità chiuso e scarpe di sicurezza (classe S3) nel cortile.</li>
+  <li>Usa l’attrezzatura di sicurezza adeguata durante l’aggancio o la movimentazione dei rimorchi.</li>
+  <li>Segui sempre le regole locali e le istruzioni del personale di sicurezza e degli shunters.</li>
+</ul>
+<div class="muted">Per le regole complete, vedi il leaflet “FedEx Duiven–QAR site yard rules” (disponibile alla guardhouse e in ufficio).</div>`
+      },
+      ro: {
+        title: "QAR Duiven | Rute de condus și de mers pe jos",
+        intro: "Citește harta site-ului și regulile de siguranță. Trebuie să accepți regulamentul pentru a continua.",
+        accept: "Accept regulamentul (house rules)",
+        cont: "Continuă",
+        open_pdf: "Deschide PDF-ul într-un tab nou",
+        html: `<h3>Harta site-ului – locații cheie</h3>
+<ul>
+  <li><b>Birouri/facilități șoferi</b>: A – Poartă / lounge șoferi; B – Briefing șoferi &amp; birou documente</li>
+  <li><b>Parcări</b>: C – Parcare odihnă șoferi; D – Parcare remorci; E – Parcare relay → cap tractor + remorcă; F – Parcare relay → cap tractor singur; G – Parcare vizitatori</li>
+  <li><b>Pietoni</b>: H – Intrare lounge; I – Scări către pasarela spre birou; J – Poartă pietonală către birou</li>
+  <li><b>Bariere</b>: K – Barieră intrare camioane; L – Ieșire curte către parcare șoferi; M – Intrare curte din zona șoferi; N – Barieră parcare vizitatori; O – Barieră ieșire camioane</li>
+</ul>
+
+<h3>CONDUS – intrare/ieșire parcare odihnă șoferi</h3>
+<ul>
+  <li>După punctul de control (A), mergeți drept până la parcarea de odihnă (C).</li>
+  <li>Intrați în parcarea de odihnă prin bariera (L).</li>
+  <li>Treceți prin bariera (M) pentru a ieși din parcare și a accesa curtea.</li>
+</ul>
+
+<h3>PE JOS</h3>
+<ul>
+  <li><b>Din lounge la birou</b>: urcați scările (I) din lounge (A) pe pasarelă, mergeți pe lângă gard și urmați indicatoarele, apoi treceți prin poarta (J) către biroul de briefing (B).</li>
+  <li><b>Din parcarea relay la birou</b>: urmați traseul cu marcaje verzi lângă gard, continuați drept, apoi treceți prin poarta (J) către biroul de briefing (B).</li>
+</ul>
+
+<h3>În caz de urgență</h3>
+<ul>
+  <li>Păstrați calmul.</li>
+  <li>Sunați mai întâi la <b>112</b>.</li>
+  <li>Sunați securitatea FedEx: <b>0316 799 476</b>.</li>
+  <li>În caz de incendiu sau alarmă: ieșiți pe cea mai apropiată ieșire de urgență și mergeți la punctul de adunare.</li>
+</ul>
+
+<h3>Reguli de siguranță pe site</h3>
+<ul>
+  <li>Limită de viteză: <b>15 km/h</b>.</li>
+  <li>Trafic într-un singur sens în curte.</li>
+  <li>Mergeți doar pe căile pietonale marcate.</li>
+  <li>Purtați vestă reflectorizantă închisă și încălțăminte de protecție (clasa S3) în curte.</li>
+  <li>Folosiți echipamentul de siguranță adecvat la cuplare sau manipularea remorcilor.</li>
+  <li>Respectați regulile locale și instrucțiunile personalului de securitate și shunterilor.</li>
+</ul>
+<div class="muted">Pentru reguli complete, consultați pliantul „FedEx Duiven–QAR site yard rules” (disponibil la poartă și în birou).</div>`
+      },
+      ru: {
+        title: "QAR Duiven | Маршруты движения и пешие маршруты",
+        intro: "Пожалуйста, ознакомьтесь со схемой площадки и правилами безопасности. Чтобы продолжить, нужно принять правила площадки.",
+        accept: "Я принимаю правила площадки",
+        cont: "Продолжить",
+        open_pdf: "Открыть PDF в новой вкладке",
+        html: `<h3>Схема площадки – ключевые места</h3>
+<ul>
+  <li><b>Офисы/зоны для водителей</b>: A – КПП / лаунж для водителей; B – Офис брифинга и документов</li>
+  <li><b>Парковки</b>: C – Парковка отдыха водителей; D – Парковка прицепов; E – Relay-парковка → тягач с прицепом; F – Relay-парковка → тягач без прицепа; G – Парковка для посетителей</li>
+  <li><b>Пешеходы</b>: H – Вход в лаунж; I – Лестница на пешеходный проход к офису; J – Пешеходные ворота к офису</li>
+  <li><b>Шлагбаумы</b>: K – Въезд грузовиков; L – Выезд с двора на парковку водителей; M – Въезд во двор из зоны водителей; N – Шлагбаум парковки посетителей; O – Выезд грузовиков</li>
+</ul>
+
+<h3>ДВИЖЕНИЕ – въезд/выезд на парковку отдыха водителей</h3>
+<ul>
+  <li>Проехав КПП (A), двигайтесь прямо к парковке отдыха (C).</li>
+  <li>Въезд на парковку отдыха через шлагбаум (L).</li>
+  <li>Для выезда и доступа во двор проезжайте через шлагбаум (M).</li>
+</ul>
+
+<h3>ПЕШКОМ</h3>
+<ul>
+  <li><b>Из лаунжа в офис</b>: поднимитесь по лестнице (I) из лаунжа (A) на проход, идите вдоль забора и следуйте указателям, затем пройдите через ворота (J) к офису брифинга (B).</li>
+  <li><b>С relay-парковки в офис</b>: идите по дорожке с зелёной разметкой вдоль забора, продолжайте прямо и пройдите через ворота (J) к офису брифинга (B).</li>
+</ul>
+
+<h3>В экстренной ситуации</h3>
+<ul>
+  <li>Сохраняйте спокойствие.</li>
+  <li>Сначала звоните <b>112</b>.</li>
+  <li>Безопасность FedEx: <b>0316 799 476</b>.</li>
+  <li>При пожаре/сработавшей сигнализации: выйдите через ближайший аварийный выход и направляйтесь к месту сбора.</li>
+</ul>
+
+<h3>Правила безопасности на площадке</h3>
+<ul>
+  <li>Ограничение скорости: <b>15 км/ч</b>.</li>
+  <li>Одностороннее движение во дворе.</li>
+  <li>Ходите только по обозначенным пешеходным маршрутам.</li>
+  <li>Носите закрытый светоотражающий жилет и защитную обувь (класс S3) во дворе.</li>
+  <li>Используйте соответствующие средства защиты при стыковке/работе с прицепами.</li>
+  <li>Всегда соблюдайте местные правила и указания охраны и шунтеров.</li>
+</ul>
+<div class="muted">Полные правила: буклет FedEx Duiven–QAR (доступен на КПП и в офисе).</div>`
+      },
+      lt: {
+        title: "QAR Duiven | Važiavimo ir ėjimo maršrutai",
+        intro: "Perskaitykite aikštelės žemėlapį ir saugos taisykles. Norėdami tęsti, turite sutikti su taisyklėmis.",
+        accept: "Sutinku su aikštelės taisyklėmis",
+        cont: "Tęsti",
+        open_pdf: "Atidaryti PDF naujame skirtuke",
+        html: `<h3>Aikštelės žemėlapis – pagrindinės vietos</h3>
+<ul>
+  <li><b>Biurai / vairuotojų patalpos</b>: A – Sargybinė / vairuotojų poilsio zona; B – Vairuotojų instruktažas &amp; dokumentų biuras</li>
+  <li><b>Parkavimo zonos</b>: C – Vairuotojų poilsio parkavimas; D – Priekabų parkavimas; E – Relay parkavimas → vilkikas su priekaba; F – Relay parkavimas → vilkikas be priekabos; G – Lankytojų parkavimas</li>
+  <li><b>Pėstieji</b>: H – Įėjimas į vairuotojų zoną; I – Laiptai į taką link biuro; J – Pėsčiųjų varteliai į biurą</li>
+  <li><b>Užtvarai</b>: K – Sunkvežimių įvažiavimo užtvaras; L – Išvažiavimas iš kiemo į vairuotojų parkavimą; M – Įvažiavimas į kiemą iš vairuotojų zonos; N – Lankytojų parkavimo užtvaras; O – Sunkvežimių išvažiavimo užtvaras</li>
+</ul>
+
+<h3>VAŽIAVIMAS – įvažiavimas/išvažiavimas iš vairuotojų poilsio parkavimo</h3>
+<ul>
+  <li>Praėjus sargybinei (A), važiuokite tiesiai į vairuotojų poilsio parkavimą (C).</li>
+  <li>Įvažiuokite per užtvarą (L).</li>
+  <li>Norėdami išvažiuoti ir patekti į kiemą, pravažiuokite per užtvarą (M).</li>
+</ul>
+
+<h3>EJIMAS PĖSČIOMIS</h3>
+<ul>
+  <li><b>Iš poilsio zonos į biurą</b>: lipkite laiptais (I) iš zonos (A) į taką, eikite palei tvorą ir sekite ženklus, tada praeikite pro vartelius (J) iki briefing biuro (B).</li>
+  <li><b>Iš relay parkavimo į biurą</b>: eikite taku su žaliomis žymomis palei tvorą, eikite tiesiai ir praeikite pro vartelius (J) iki briefing biuro (B).</li>
+</ul>
+
+<h3>Avarijos atveju</h3>
+<ul>
+  <li>Išlikite ramūs.</li>
+  <li>Pirmiausia skambinkite <b>112</b>.</li>
+  <li>Skambinkite FedEx apsaugai: <b>0316 799 476</b>.</li>
+  <li>Gaisro ar signalo atveju: išeikite per artimiausią avarinį išėjimą ir eikite į susirinkimo vietą.</li>
+</ul>
+
+<h3>Saugos taisyklės aikštelėje</h3>
+<ul>
+  <li>Greičio limitas: <b>15 km/h</b>.</li>
+  <li>Kieme – vienos krypties eismas.</li>
+  <li>Eikite tik pažymėtais pėsčiųjų takais.</li>
+  <li>Kieme dėvėkite užsegtą ryškiaspalvę liemenę ir apsauginius batus (S3).</li>
+  <li>Prijungiant ar tvarkant priekabas naudokite tinkamas apsaugos priemones.</li>
+  <li>Visada laikykitės vietinių taisyklių ir apsaugos bei shunterių nurodymų.</li>
+</ul>
+<div class="muted">Pilnos taisyklės: bukletas „FedEx Duiven–QAR site yard rules“ (gaunamas sargybinėje ir biure).</div>`
+      },
+      kk: {
+        title: "QAR Duiven | Көлікпен және жаяу жүру бағыттары",
+        intro: "Алаң картасын және қауіпсіздік ережелерін оқып шығыңыз. Жалғастыру үшін алаң ережелерін қабылдауыңыз керек.",
+        accept: "Мен алаң ережелерін қабылдаймын",
+        cont: "Жалғастыру",
+        open_pdf: "PDF-ті жаңа қойындыда ашу",
+        html: `<h3>Алаң картасы – негізгі орындар</h3>
+<ul>
+  <li><b>Кеңсе/жүргізуші аймақтары</b>: A – Күзет бекеті / жүргізуші лаунжы; B – Брифинг және құжаттар кеңсесі</li>
+  <li><b>Тұрақ аймақтары</b>: C – Жүргізуші демалыс тұрағы; D – Тіркеме тұрағы; E – Relay тұрағы → тіркемесі бар тартқыш; F – Relay тұрағы → жеке тартқыш; G – Келушілер тұрағы</li>
+  <li><b>Жаяу жүргінші</b>: H – Лаунжға кіреберіс; I – Кеңсеге баратын жаяу жолға баспалдақ; J – Кеңсеге жаяу қақпа</li>
+  <li><b>Шлагбаумдар</b>: K – Жүк көлігі кіреберіс шлагбаумы; L – Аулада шығу → жүргізуші тұрағы; M – Жүргізуші аймағынан аулаға кіру; N – Келушілер тұрағы шлагбаумы; O – Жүк көлігі шығу шлагбаумы</li>
+</ul>
+
+<h3>КӨЛІКПЕН – демалыс тұрағына кіру/шығу</h3>
+<ul>
+  <li>Күзет бекетінен (A) өткен соң, демалыс тұрағына (C) дейін түзу жүріңіз.</li>
+  <li>Шлагбаум (L) арқылы демалыс тұрағына кіріңіз.</li>
+  <li>Аулаға шығу үшін шлагбаумнан (M) өтіңіз.</li>
+</ul>
+
+<h3>ЖАЯУ</h3>
+<ul>
+  <li><b>Лаунждан кеңсеге</b>: лаунждан (A) баспалдақпен (I) жаяу жолға шығып, қоршау бойымен жүріп, белгілерді қадағалаңыз, содан кейін қақпадан (J) өтіп брифинг кеңсесіне (B) барыңыз.</li>
+  <li><b>Relay тұрағынан кеңсеге</b>: қоршау жанындағы жасыл белгіленген жолмен жүріңіз, түзу жалғастырыңыз, содан кейін қақпадан (J) өтіп брифинг кеңсесіне (B) барыңыз.</li>
+</ul>
+
+<h3>Төтенше жағдайда</h3>
+<ul>
+  <li>Сабыр сақтаңыз.</li>
+  <li>Алдымен <b>112</b> нөміріне қоңырау шалыңыз.</li>
+  <li>FedEx қауіпсіздігі: <b>0316 799 476</b>.</li>
+  <li>Өрт немесе өрт дабылы кезінде: ең жақын авариялық шығу арқылы шығып, жиналу нүктесіне барыңыз.</li>
+</ul>
+
+<h3>Алаңдағы қауіпсіздік ережелері</h3>
+<ul>
+  <li>Жылдамдық шегі: <b>15 км/сағ</b>.</li>
+  <li>Аулада бір бағытты қозғалыс.</li>
+  <li>Тек белгіленген жаяу жолдармен жүріңіз.</li>
+  <li>Аулада жабық жарыққайтарғыш кеудеше және қауіпсіздік аяқ киімі (S3) киіңіз.</li>
+  <li>Тіркемені докқа қою/өңдеу кезінде тиісті қорғаныс құралдарын қолданыңыз.</li>
+  <li>Жергілікті ережелерді және күзет пен shunter нұсқауларын әрдайым орындаңыз.</li>
+</ul>
+<div class="muted">Толық ережелер: FedEx Duiven–QAR алаң ережелері буклеті (күзет бекетінде және кеңседе бар).</div>`
+      },
+      hi: {
+        title: "QAR Duiven | ड्राइविंग और पैदल मार्ग",
+        intro: "कृपया साइट मैप और सुरक्षा नियम पढ़ें। आगे बढ़ने के लिए आपको साइट के नियम स्वीकार करने होंगे।",
+        accept: "मैं साइट के नियम स्वीकार करता/करती हूँ",
+        cont: "जारी रखें",
+        open_pdf: "PDF नई टैब में खोलें",
+        html: `<h3>साइट मैप – प्रमुख स्थान</h3>
+<ul>
+  <li><b>ऑफिस/ड्राइवर सुविधाएँ</b>: A – गेटहाउस / ड्राइवर लाउंज; B – ड्राइवर ब्रीफिंग और दस्तावेज़ कार्यालय</li>
+  <li><b>पार्किंग क्षेत्र</b>: C – ड्राइवर रेस्ट पार्किंग; D – ट्रेलर पार्किंग; E – रिले पार्किंग → ट्रक + ट्रेलर; F – रिले पार्किंग → केवल ट्रक; G – विज़िटर पार्किंग</li>
+  <li><b>पैदल यात्री</b>: H – ड्राइवर लाउंज प्रवेश; I – ऑफिस वॉकवे के लिए सीढ़ियाँ; J – ऑफिस के लिए पैदल गेट</li>
+  <li><b>बैARRIER गेट</b>: K – ट्रक एंट्रेंस बैARRIER; L – यार्ड से ड्राइवर पार्किंग की ओर निकास; M – ड्राइवर क्षेत्र से यार्ड में प्रवेश; N – विज़िटर पार्किंग बैARRIER; O – ट्रक एग्ज़िट बैARRIER</li>
+</ul>
+
+<h3>ड्राइविंग – ड्राइवर रेस्ट पार्किंग में प्रवेश/निकास</h3>
+<ul>
+  <li>गेटहाउस (A) के बाद सीधे ड्राइवर रेस्ट पार्किंग (C) तक जाएँ।</li>
+  <li>बैARRIER गेट (L) से होकर पार्किंग में प्रवेश करें।</li>
+  <li>यार्ड तक पहुँचने के लिए बैARRIER गेट (M) से होकर बाहर निकलें।</li>
+</ul>
+
+<h3>पैदल</h3>
+<ul>
+  <li><b>ड्राइवर लाउंज से ऑफिस</b>: लाउंज (A) से सीढ़ियाँ (I) लेकर वॉकवे पर जाएँ, बाड़ के साथ चलते हुए संकेतों का पालन करें, फिर गेट (J) से होकर ब्रीफिंग ऑफिस (B) पहुँचें।</li>
+  <li><b>रिले पार्किंग से ऑफिस</b>: बाड़ के पास हरे निशान वाले रास्ते पर चलें, सीधे आगे बढ़ें, फिर गेट (J) से होकर ब्रीफिंग ऑफिस (B) पहुँचें।</li>
+</ul>
+
+<h3>आपात स्थिति में</h3>
+<ul>
+  <li>शांत रहें।</li>
+  <li>सबसे पहले <b>112</b> पर कॉल करें।</li>
+  <li>FedEx सुरक्षा: <b>0316 799 476</b>।</li>
+  <li>आग/फायर अलार्म में: नज़दीकी आपात निकास से बाहर जाएँ और असेंबली पॉइंट पर जाएँ।</li>
+</ul>
+
+<h3>साइट सुरक्षा नियम</h3>
+<ul>
+  <li>गति सीमा: <b>15 किमी/घं</b>।</li>
+  <li>यार्ड में एक-तरफ़ा ट्रैफ़िक।</li>
+  <li>केवल निर्धारित पैदल मार्गों पर चलें।</li>
+  <li>यार्ड में बंद हाई-विज़िबिलिटी सेफ़्टी वेस्ट और सेफ़्टी शूज़ (क्लास S3) पहनें।</li>
+  <li>ट्रेलर डॉकिंग/हैंडलिंग के समय उपयुक्त सुरक्षा उपकरण का उपयोग करें।</li>
+  <li>स्थानीय नियमों तथा सुरक्षा कर्मियों और शंटरों के निर्देशों का पालन करें।</li>
+</ul>
+<div class="muted">पूरे नियम: FedEx Duiven–QAR साइट यार्ड नियम पुस्तिका (गेटहाउस और ऑफिस में उपलब्ध)।</div>`
+      },
+      pl: {
+        title: "QAR Duiven | Trasy dojazdu i dojścia",
+        intro: "Zapoznaj się z mapą terenu i zasadami bezpieczeństwa. Aby kontynuować, musisz zaakceptować regulamin.",
+        accept: "Akceptuję regulamin terenu",
+        cont: "Dalej",
+        open_pdf: "Otwórz PDF w nowej karcie",
+        html: `<h3>Mapa terenu – kluczowe miejsca</h3>
+<ul>
+  <li><b>Biura/strefy kierowców</b>: A – Portiernia / lounge kierowców; B – Biuro briefingu i dokumentów</li>
+  <li><b>Parkingi</b>: C – Parking odpoczynku kierowców; D – Parking naczep; E – Parking relay → ciągnik z naczepą; F – Parking relay → sam ciągnik; G – Parking dla gości</li>
+  <li><b>Piesi</b>: H – Wejście do lounge; I – Schody na kładkę do biura; J – Brama piesza do biura</li>
+  <li><b>Szlabany</b>: K – Szlaban wjazdowy dla ciężarówek; L – Wyjazd z placu na parking kierowców; M – Wjazd na plac ze strefy kierowców; N – Szlaban parkingu gości; O – Szlaban wyjazdowy dla ciężarówek</li>
+</ul>
+
+<h3>JAZDA – wjazd/wyjazd z parkingu odpoczynku</h3>
+<ul>
+  <li>Po minięciu portierni (A) jedź prosto do parkingu odpoczynku (C).</li>
+  <li>Wjedź na parking przez szlaban (L).</li>
+  <li>Aby wyjechać i dostać się na plac, przejedź przez szlaban (M).</li>
+</ul>
+
+<h3>PIESZO</h3>
+<ul>
+  <li><b>Z lounge do biura</b>: wejdź schodami (I) z lounge (A) na kładkę, idź wzdłuż ogrodzenia i kieruj się znakami, następnie przejdź przez bramę (J) do biura briefingu (B).</li>
+  <li><b>Z parkingu relay do biura</b>: idź ścieżką z zielonymi oznaczeniami przy ogrodzeniu, idź prosto, następnie przejdź przez bramę (J) do biura briefingu (B).</li>
+</ul>
+
+<h3>W sytuacji awaryjnej</h3>
+<ul>
+  <li>Zachowaj spokój.</li>
+  <li>Najpierw zadzwoń pod <b>112</b>.</li>
+  <li>Zadzwoń do ochrony FedEx: <b>0316 799 476</b>.</li>
+  <li>W razie pożaru/alarmu: wyjdź najbliższym wyjściem ewakuacyjnym i idź do punktu zbiórki.</li>
+</ul>
+
+<h3>Zasady bezpieczeństwa na terenie</h3>
+<ul>
+  <li>Limit prędkości: <b>15 km/h</b>.</li>
+  <li>Ruch jednokierunkowy na placu.</li>
+  <li>Poruszaj się tylko wyznaczonymi ciągami pieszymi.</li>
+  <li>Na placu noś zapiętą kamizelkę odblaskową i buty ochronne (klasa S3).</li>
+  <li>Używaj odpowiednich środków ochrony przy dokowaniu/obsłudze naczep.</li>
+  <li>Zawsze stosuj się do lokalnych zasad oraz poleceń ochrony i shunterów.</li>
+</ul>
+<div class="muted">Pełne zasady: broszura „FedEx Duiven–QAR site yard rules” (dostępna w portierni i biurze).</div>`
+      },
+      hu: {
+        title: "QAR Duiven | Behajtási és gyalogos útvonalak",
+        intro: "Kérlek olvasd el a telephely térképét és a biztonsági szabályokat. A folytatáshoz el kell fogadnod a házirendet.",
+        accept: "Elfogadom a házirendet",
+        cont: "Tovább",
+        open_pdf: "PDF megnyitása új lapon",
+        html: `<h3>Telephely térkép – kulcs helyszínek</h3>
+<ul>
+  <li><b>Irodák/sofőr létesítmények</b>: A – Kapuőrház / sofőr pihenő; B – Sofőr briefing &amp; papírmunka iroda</li>
+  <li><b>Parkolók</b>: C – Sofőr pihenő parkoló; D – Pótkocsi parkoló; E – Relay parkoló → vontató + pótkocsi; F – Relay parkoló → solo vontató; G – Látogatói parkoló</li>
+  <li><b>Gyalogosok</b>: H – Bejárat a sofőr pihenőbe; I – Lépcső az irodához vezető sétányra; J – Gyalogos kapu az irodához</li>
+  <li><b>Sorompók</b>: K – Teherautó bejárati sorompó; L – Udvar kijárat a sofőr parkolóhoz; M – Udvar bejárat a sofőr zónából; N – Látogatói parkoló sorompó; O – Teherautó kijárati sorompó</li>
+</ul>
+
+<h3>VEZETÉS – sofőr pihenő parkoló be/ki</h3>
+<ul>
+  <li>A kapuőrház (A) után hajts egyenesen a sofőr pihenő parkolóba (C).</li>
+  <li>A sorompón (L) keresztül hajts be a pihenő parkolóba.</li>
+  <li>Az udvar eléréséhez hajts át a sorompón (M) és hagyd el a pihenő parkolót.</li>
+</ul>
+
+<h3>GYALOG</h3>
+<ul>
+  <li><b>A pihenőből az irodába</b>: menj fel a lépcsőn (I) a pihenőből (A) a sétányra, haladj a kerítés mellett és kövesd a táblákat, majd menj át a kapun (J) a briefing irodához (B).</li>
+  <li><b>A relay parkolóból az irodába</b>: kövesd a zöld jelölésű utat a kerítés mellett, menj egyenesen, majd menj át a kapun (J) a briefing irodához (B).</li>
+</ul>
+
+<h3>Vészhelyzet esetén</h3>
+<ul>
+  <li>Maradj nyugodt.</li>
+  <li>Először hívd a <b>112</b>-t.</li>
+  <li>Hívd a FedEx security-t: <b>0316 799 476</b>.</li>
+  <li>Tűz vagy tűzriadó esetén: a legközelebbi vészkijáraton hagyd el az épületet és menj a gyülekezési pontra.</li>
+</ul>
+
+<h3>Telephelyi biztonsági szabályok</h3>
+<ul>
+  <li>Sebességhatár: <b>15 km/h</b>.</li>
+  <li>Az udvaron egyirányú forgalom van.</li>
+  <li>Csak kijelölt gyalogos útvonalon közlekedj.</li>
+  <li>Az udvaron zárt, láthatósági mellényt és munkavédelmi cipőt (S3) viselj.</li>
+  <li>Pótkocsi dokkolásakor/kezelésekor megfelelő védőeszközt használj.</li>
+  <li>Mindig kövesd a helyi szabályokat, valamint a security és a shunterek utasításait.</li>
+</ul>
+<div class="muted">Teljes szabályok: FedEx Duiven–QAR telephelyi szabályok szórólap (a kapuőrháznál és az irodában elérhető).</div>`
+      },
+      uz: {
+        title: "QAR Duiven | Haydash va piyoda yo‘nalishlar",
+        intro: "Iltimos, hudud xaritasi va xavfsizlik qoidalarini o‘qing. Davom etish uchun hudud qoidalarini qabul qilishingiz kerak.",
+        accept: "Men hudud qoidalarini qabul qilaman",
+        cont: "Davom etish",
+        open_pdf: "PDF-ni yangi yorliqda ochish",
+        html: `<h3>Hudud xaritasi – muhim joylar</h3>
+<ul>
+  <li><b>Ofislar/haydovchi hududi</b>: A – Qo‘riqlash punkti / haydovchilar dam olish joyi; B – Brifing va hujjatlar ofisi</li>
+  <li><b>To‘xtash joylari</b>: C – Haydovchilar dam olish parkingi; D – Tirkama parkingi; E – Relay parking → yuk mashinasi+tirkama; F – Relay parking → solo yuk mashinasi; G – Mehmonlar parkingi</li>
+  <li><b>Piyodalar</b>: H – Dam olish joyiga kirish; I – Ofis yo‘lagiga olib boruvchi zinapoya; J – Ofisga piyoda darvoza</li>
+  <li><b>To‘siq darvozalar</b>: K – Yuk mashinasi kirish to‘sig‘i; L – Hududdan haydovchi parkingiga chiqish; M – Haydovchi hududidan hududga kirish; N – Mehmonlar parkingi to‘sig‘i; O – Yuk mashinasi chiqish to‘sig‘i</li>
+</ul>
+
+<h3>HAYDASH – dam olish parkingiga kirish/chiqish</h3>
+<ul>
+  <li>Qo‘riqlash punktidan (A) o‘tgach, to‘g‘ri yurib dam olish parkingiga (C) boring.</li>
+  <li>To‘siq darvoza (L) orqali parkingga kiring.</li>
+  <li>Hududga chiqish uchun to‘siq darvoza (M) orqali o‘ting.</li>
+</ul>
+
+<h3>PIYODA</h3>
+<ul>
+  <li><b>Dam olish joyidan ofisga</b>: dam olish joyidan (A) zinapoya (I) orqali yo‘lakka chiqing, panjara bo‘ylab yuring va belgilarga amal qiling, so‘ng darvozadan (J) o‘tib brifing ofisiga (B) boring.</li>
+  <li><b>Relay parkingdan ofisga</b>: panjara yonidagi yashil belgilangan yo‘ldan yuring, to‘g‘ri davom eting, so‘ng darvozadan (J) o‘tib brifing ofisiga (B) boring.</li>
+</ul>
+
+<h3>Favqulodda holatda</h3>
+<ul>
+  <li>Xotirjam bo‘ling.</li>
+  <li>Avval <b>112</b> ga qo‘ng‘iroq qiling.</li>
+  <li>FedEx xavfsizligi: <b>0316 799 476</b>.</li>
+  <li>Yong‘in/yong‘in signali bo‘lsa: eng yaqin favqulodda chiqishdan chiqing va yig‘ilish nuqtasiga boring.</li>
+</ul>
+
+<h3>Hudud xavfsizlik qoidalari</h3>
+<ul>
+  <li>Tezlik cheklovi: <b>15 km/soat</b>.</li>
+  <li>Hududda bir yo‘nalishli harakat.</li>
+  <li>Faqat belgilangan piyoda yo‘laklaridan yuring.</li>
+  <li>Hududda yopiq hi-vis jilet va xavfsizlik poyabzali (S3) kiying.</li>
+  <li>Tirkamalarni doklash/ishlashda mos xavfsizlik jihozlaridan foydalaning.</li>
+  <li>Har doim mahalliy qoidalar va xavfsizlik xodimlari hamda shunter ko‘rsatmalariga amal qiling.</li>
+</ul>
+<div class="muted">To‘liq qoidalar: FedEx Duiven–QAR hudud qoidalari bukleti (qo‘riqlash punkti va ofisda mavjud).</div>`
+      },
+      tg: {
+        title: "QAR Duiven | Роҳҳои рондан ва пиёдагардӣ",
+        intro: "Лутфан нақшаи маҳал ва қоидаҳои бехатариро хонед. Барои идома қоидаҳои маҳалро қабул кардан лозим аст.",
+        accept: "Ман қоидаҳои маҳалро қабул мекунам",
+        cont: "Идома",
+        open_pdf: "PDF-ро дар ҷадвали нав кушоед",
+        html: `<h3>Нақшаи маҳал – ҷойҳои муҳим</h3>
+<ul>
+  <li><b>Идора/шароити ронандагон</b>: A – Посбонхона / лонҷи ронанда; B – Офиси брифинг ва ҳуҷҷатҳо</li>
+  <li><b>Майдони таваққуф</b>: C – Таваққуфи истироҳати ронанда; D – Таваққуфи прицепҳо; E – Relay таваққуф → мошин бо прицеп; F – Relay таваққуф → мошини танҳо; G – Таваққуфи меҳмонон</li>
+  <li><b>Пиёдагард</b>: H – Даромад ба лонҷ; I – Зинапоя ба роҳрави идора; J – Дарвозаи пиёдагард ба идора</li>
+  <li><b>Монеаҳо</b>: K – Монеаи даромади мошинҳо; L – Баромад аз ҳавлӣ ба таваққуфи ронанда; M – Даромад ба ҳавлӣ аз минтақаи ронанда; N – Монеаи таваққуфи меҳмонон; O – Монеаи баромади мошинҳо</li>
+</ul>
+
+<h3>РОНДАН – даромад/баромад аз таваққуфи истироҳат</h3>
+<ul>
+  <li>Пас аз посбонхона (A) рост ба таваққуфи истироҳат (C) равед.</li>
+  <li>Аз монеа (L) гузашта ба таваққуф дароед.</li>
+  <li>Барои баромадан ва ба ҳавлӣ расидан аз монеа (M) гузаред.</li>
+</ul>
+
+<h3>ПИЁДА</h3>
+<ul>
+  <li><b>Аз лонҷ ба идора</b>: аз лонҷ (A) бо зинапоя (I) ба роҳрав бароед, дар канори девор (панҷара) қадам занед ва нишонаҳоро пайравӣ кунед, сипас аз дарвоза (J) гузашта ба офиси брифинг (B) расед.</li>
+  <li><b>Аз relay таваққуф ба идора</b>: роҳро бо аломатҳои сабз дар канори панҷара пайравӣ кунед, рост идома диҳед ва аз дарвоза (J) гузашта ба офиси брифинг (B) расед.</li>
+</ul>
+
+<h3>Дар ҳолати фавқулода</h3>
+<ul>
+  <li>Ором бошед.</li>
+  <li>Аввал ба <b>112</b> занг занед.</li>
+  <li>Амнияти FedEx: <b>0316 799 476</b>.</li>
+  <li>Ҳангоми сӯхтор ё ҳушдор: аз наздиктарин баромади фавқулода бароед ва ба нуқтаи ҷамъшавӣ равед.</li>
+</ul>
+
+<h3>Қоидаҳои бехатарӣ дар маҳал</h3>
+<ul>
+  <li>Ҳадди суръат: <b>15 км/соат</b>.</li>
+  <li>Ҳаракати яктарафа дар ҳавлӣ.</li>
+  <li>Танҳо дар роҳҳои махсуси пиёдагард ҳаракат кунед.</li>
+  <li>Дар ҳавлӣ жилети намоён (hi-vis) ва пойафзоли бехатарӣ (S3) пӯшед.</li>
+  <li>Ҳангоми док кардан ё кор бо прицепҳо таҷҳизоти мувофиқи бехатариро истифода баред.</li>
+  <li>Ҳамеша қоидаҳои маҳаллӣ ва дастурҳои амният ва shunter-ҳоро риоя кунед.</li>
+</ul>
+<div class="muted">Қоидаҳои пурра: буклети FedEx Duiven–QAR (дар посбонхона ва идора дастрас аст).</div>`
+      },
+      ky: {
+        title: "QAR Duiven | Айдоо жана жөө жүрүү маршруттары",
+        intro: "Сураныч, аянттын картасын жана коопсуздук эрежелерин окуңуз. Улантуу үчүн аянт эрежелерин кабыл алуу керек.",
+        accept: "Мен аянттын эрежелерин кабыл алам",
+        cont: "Улантуу",
+        open_pdf: "PDFти жаңы өтмөктө ачуу",
+        html: `<h3>Аянт картасы – негизги жерлер</h3>
+<ul>
+  <li><b>Офис/айдоочулар үчүн жайлар</b>: A – Күзөт пункту / айдоочу лаунжу; B – Брифинг жана документтер офиси</li>
+  <li><b>Токтотмо жайлар</b>: C – Айдоочу эс алуу паркинги; D – Прицеп паркинги; E – Relay паркинги → прицептүү тягач; F – Relay паркинги → жалгыз тягач; G – Коноктор паркинги</li>
+  <li><b>Жөө жүрүүчү</b>: H – Лаунжга кирүү; I – Офиске баруучу жолго тепкич; J – Офиске жөө дарбаза</li>
+  <li><b>Шлагбаумдар</b>: K – Жүк авто кирүү шлагбаумы; L – Аянттан айдоочу паркингине чыгуу; M – Айдоочу зонасынан аянтка кирүү; N – Коноктор паркинги шлагбаумы; O – Жүк авто чыгуу шлагбаумы</li>
+</ul>
+
+<h3>АЙДОО – эс алуу паркингине кирүү/чыгуу</h3>
+<ul>
+  <li>Күзөт пунктунан (A) өткөндөн кийин түз эле эс алуу паркингине (C) айдаңыз.</li>
+  <li>Шлагбаум (L) аркылуу паркингге кириңиз.</li>
+  <li>Аянтка чыгуу үчүн шлагбаумдан (M) өтүңүз.</li>
+</ul>
+
+<h3>ЖӨӨ</h3>
+<ul>
+  <li><b>Лаунждан офиске</b>: лаунждан (A) тепкич (I) менен жөө жолго чыгып, тосмонун жанынан жүрүп белгилерди ээрчиңиз, андан кийин дарбазадан (J) өтүп брифинг офисине (B) барыңыз.</li>
+  <li><b>Relay паркингинен офиске</b>: тосмонун жанындагы жашыл белгилүү жол менен жүрүңүз, түз улантыңыз, анан дарбазадан (J) өтүп брифинг офисине (B) барыңыз.</li>
+</ul>
+
+<h3>Өзгөчө кырдаалда</h3>
+<ul>
+  <li>Тынч болуңуз.</li>
+  <li>Адегенде <b>112</b> номерине чалыңыз.</li>
+  <li>FedEx коопсуздугу: <b>0316 799 476</b>.</li>
+  <li>Өрт/өрт сигналы болсо: эң жакын авариялык чыгуу аркылуу чыгып, жыйналуу пунктуна барыңыз.</li>
+</ul>
+
+<h3>Аянттагы коопсуздук эрежелери</h3>
+<ul>
+  <li>Ылдамдык чеги: <b>15 км/саат</b>.</li>
+  <li>Аянтта бир багыттуу кыймыл.</li>
+  <li>Белгиленген жөө жолдор менен гана жүрүңүз.</li>
+  <li>Аянтта жабык hi-vis жилет жана коопсуздук бут кийими (S3) кийиңиз.</li>
+  <li>Прицептерди докко коюуда/кармоодо ылайыктуу коргонуу каражаттарын колдонуңуз.</li>
+  <li>Жергиликтүү эрежелерди жана коопсуздук кызматкерлери менен shunter көрсөтмөлөрүн дайыма аткарыңыз.</li>
+</ul>
+<div class="muted">Толук эрежелер: FedEx Duiven–QAR буклети (күзөт пунктунда жана офисте бар).</div>`
+      },
+      be: {
+        title: "QAR Duiven | Маршруты руху і пешыя маршруты",
+        intro: "Калі ласка, азнаёмцеся з картай пляцоўкі і правіламі бяспекі. Каб працягнуць, трэба прыняць правілы пляцоўкі.",
+        accept: "Я прымаю правілы пляцоўкі",
+        cont: "Працягнуць",
+        open_pdf: "Адкрыць PDF у новай укладцы",
+        html: `<h3>Карта пляцоўкі – ключавыя месцы</h3>
+<ul>
+  <li><b>Офіс/зоны кіроўцаў</b>: A – Прапускны пункт / лаунж кіроўцаў; B – Офіс брыфінгу і дакументаў</li>
+  <li><b>Паркоўкі</b>: C – Паркоўка адпачынку кіроўцаў; D – Паркоўка прычэпаў; E – Relay-паркоўка → цягач з прычэпам; F – Relay-паркоўка → цягач без прычэпа; G – Паркоўка для наведвальнікаў</li>
+  <li><b>Пешаходы</b>: H – Уваход у лаунж; I – Лесвіца на пешаходны праход да офіса; J – Пешая брама да офіса</li>
+  <li><b>Шлагбаумы</b>: K – Уваход грузавікоў; L – Выезд з двара на паркоўку кіроўцаў; M – Уезд у двор з зоны кіроўцаў; N – Шлагбаум паркоўкі наведвальнікаў; O – Выезд грузавікоў</li>
+</ul>
+
+<h3>РУХ – уезд/выезд на паркоўку адпачынку</h3>
+<ul>
+  <li>Пасля КПП (A) рухайцеся прама да паркоўкі адпачынку (C).</li>
+  <li>Уезд на паркоўку праз шлагбаум (L).</li>
+  <li>Каб выехаць і трапіць у двор, праязджайце праз шлагбаум (M).</li>
+</ul>
+
+<h3>ПЕШКІ</h3>
+<ul>
+  <li><b>З лаунжа ў офіс</b>: падыміцеся па лесвіцы (I) з лаунжа (A) на праход, ідзіце ўздоўж плота і па ўказальніках, затым прайдзіце праз браму (J) да офіса брыфінгу (B).</li>
+  <li><b>З relay-паркоўкі ў офіс</b>: ідзіце па дарожцы з зялёнай разметкай уздоўж плота, працягвайце прама і прайдзіце праз браму (J) да офіса брыфінгу (B).</li>
+</ul>
+
+<h3>У выпадку надзвычайнай сітуацыі</h3>
+<ul>
+  <li>Захоўвайце спакой.</li>
+  <li>Спачатку тэлефануйце <b>112</b>.</li>
+  <li>Бяспека FedEx: <b>0316 799 476</b>.</li>
+  <li>Пры пажары/сігнале: выйдзіце праз бліжэйшы аварыйны выхад і ідзіце да пункта збору.</li>
+</ul>
+
+<h3>Правілы бяспекі на пляцоўцы</h3>
+<ul>
+  <li>Абмежаванне хуткасці: <b>15 км/г</b>.</li>
+  <li>Аднабаковы рух у двары.</li>
+  <li>Хадзіце толькі па пазначаных пешаходных маршрутах.</li>
+  <li>Носіце зашпіленую светоадбівальную камізэльку і абутак бяспекі (клас S3) у двары.</li>
+  <li>Выкарыстоўвайце адпаведныя сродкі аховы пры докаванні/працы з прычэпамі.</li>
+  <li>Заўсёды выконвайце мясцовыя правілы і інструкцыі аховы і shunter’аў.</li>
+</ul>
+<div class="muted">Поўныя правілы: буклет FedEx Duiven–QAR (даступны на КПП і ў офісе).</div>`
+      }
+    };
+
+
+    function _houseRulesPack() {
+      return HOUSE_RULES[CURRENT_LANG] || HOUSE_RULES.en;
+    }
+
+    function showHouseRulesModal(plate) {
+      const pack = _houseRulesPack();
+      const backdrop = document.getElementById("hrBackdrop");
+      const titleEl = document.getElementById("hrTitle");
+      const introEl = document.getElementById("hrIntro");
+      const textEl = document.getElementById("hrText");
+      const openEl = document.getElementById("hrOpenPdf");
+      const acceptEl = document.getElementById("hrAccept");
+      const acceptLabelEl = document.getElementById("hrAcceptLabel");
+      const contBtn = document.getElementById("hrContinue");
+
+      titleEl.textContent = pack.title || "House rules";
+      introEl.textContent = pack.intro || "";
+      acceptLabelEl.textContent = pack.accept || "I accept";
+      contBtn.textContent = pack.cont || "Continue";
+      openEl.textContent = pack.open_pdf || "Open PDF";
+      textEl.innerHTML = pack.html || "";
+
+      acceptEl.checked = false;
+      contBtn.disabled = true;
+
+      const onToggle = () => {
+        contBtn.disabled = !acceptEl.checked;
+      };
+
+      return new Promise((resolve) => {
+        const onContinue = async () => {
+          if (!acceptEl.checked) return;
+
+          contBtn.disabled = true;
+          const contText = pack.cont || "Continue";
+          contBtn.textContent = contText + "…";
+
+          try {
+            const res = await fetch(`${API_BASE}/api/house_rules_accept`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ plate })
+            });
+            const data = await readJsonOrText(res);
+
+            if (!res.ok) {
+              introEl.innerHTML = `<b>${t("err_error")}:</b> ${data.detail || res.statusText}`;
+              contBtn.textContent = contText;
+              contBtn.disabled = false;
+              return;
+            }
+
+            backdrop.style.display = "none";
+            cleanup();
+            contBtn.textContent = contText;
+            resolve(true);
+          } catch (e) {
+            introEl.innerHTML = `<b>${t("err_network")}:</b> ${e.message}`;
+            contBtn.textContent = pack.cont || "Continue";
+            contBtn.disabled = false;
+          }
+        };
+
+        const cleanup = () => {
+          acceptEl.removeEventListener("change", onToggle);
+          contBtn.removeEventListener("click", onContinue);
+        };
+
+        acceptEl.addEventListener("change", onToggle);
+        contBtn.addEventListener("click", onContinue);
+
+        // block closing without acceptance (no outside click handler)
+        backdrop.style.display = "flex";
+      });
+    }
+
 
     function t(key) {
       const pack = UI[CURRENT_LANG] || UI.en;
@@ -3094,6 +4370,10 @@ INDEX_HTML = r"""<!doctype html>
           document.getElementById("btnNotify").style.display = "none";
           setNotifyMsg("", "");
           return;
+        }
+
+        if (data && data.house_rules_required) {
+          await showHouseRulesModal(plate);
         }
 
         const last = data.last_refresh || "-";
