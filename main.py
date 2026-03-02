@@ -56,7 +56,6 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 #   - DEST_LAND_XLSX: path to dest-land.xlsx / .xlsm
 LOCATIONS_XLSX_ENV = os.environ.get("LOCATIONS_XLSX", "").strip()
 DEST_LAND_XLSX_ENV = os.environ.get("DEST_LAND_XLSX", "").strip()
-HOUSE_RULES_PDF_ENV = os.environ.get("HOUSE_RULES_PDF", "").strip()  # optional override for the house rules PDF
 
 
 def _pick_existing_path(candidates: List[str]) -> str:
@@ -68,16 +67,6 @@ def _pick_existing_path(candidates: List[str]) -> str:
         if p and os.path.exists(p):
             return p
     return first_non_empty
-
-def _house_rules_pdf_path() -> str:
-    """Resolve the PDF path for the on-site house rules / routes document."""
-    return _pick_existing_path([
-        HOUSE_RULES_PDF_ENV,
-        os.path.join(STATIC_DIR, "house_rules.pdf"),
-        os.path.join(BASE_DIR, "house_rules.pdf"),
-    ])
-
-
 
 def _locations_path() -> str:
     # Prefer env var, otherwise try common locations
@@ -1717,17 +1706,6 @@ def get_status(
 
 
 
-@app.get("/house_rules.pdf")
-def house_rules_pdf() -> Response:
-    p = _house_rules_pdf_path()
-    if not p or not os.path.exists(p):
-        raise HTTPException(
-            status_code=404,
-            detail="House rules PDF not configured. Put it at static/house_rules.pdf or set HOUSE_RULES_PDF.",
-        )
-    return FileResponse(p, media_type="application/pdf", filename="house_rules.pdf")
-
-
 @app.post("/api/house_rules_accept")
 def house_rules_accept(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     if not isinstance(payload, dict):
@@ -2206,17 +2184,6 @@ INDEX_HTML = r"""<!doctype html>
     .modal-title { font-size: 18px; font-weight: 700; }
     .modal-body { padding: 12px 14px 14px; }
 
-    .hr-embed iframe {
-      width: 100%;
-      height: 340px;
-      border: 1px solid rgba(0,0,0,0.15);
-      border-radius: 12px;
-      background: #fff;
-    }
-    .hr-links { margin-top: 8px; }
-    .hr-links a { color: #4D148C; font-weight: 700; text-decoration: none; }
-    .hr-links a:hover { text-decoration: underline; }
-
     .hr-text {
       margin-top: 10px;
       padding: 10px 12px;
@@ -2227,6 +2194,16 @@ INDEX_HTML = r"""<!doctype html>
     .hr-text h3 { margin: 10px 0 6px; font-size: 15px; }
     .hr-text ul { margin: 6px 0 10px 18px; }
     .hr-text li { margin: 2px 0; }
+
+    .hr-img {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 12px;
+      border: 1px solid rgba(0,0,0,0.12);
+      background: rgba(255,255,255,0.85);
+      margin: 8px 0 10px;
+    }
 
     .hr-accept { margin-top: 12px; display: flex; gap: 10px; align-items: center; }
     .hr-accept-label { font-weight: 700; }
@@ -2305,12 +2282,6 @@ INDEX_HTML = r"""<!doctype html>
       </div>
       <div class="modal-body">
         <div id="hrIntro" class="muted" style="margin-bottom:10px;"></div>
-
-        <div class="hr-embed">
-          <iframe id="hrFrame" src="/house_rules.pdf" title="House rules PDF"></iframe>
-          <div class="hr-links">
-            <a id="hrOpenPdf" href="/house_rules.pdf" target="_blank" rel="noopener">Open PDF</a>
-          </div>
         </div>
 
         <div id="hrText" class="hr-text"></div>
@@ -3155,7 +3126,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "I accept the house rules",
         cont: "Continue",
         open_pdf: "Open PDF in a new tab",
-        html: `<h3>Site map – key locations</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Site map – key locations</h3>
 <ul>
   <li><b>Offices/driver facilities</b>: A – Gatehouse / driver lounge; B – Driver briefing &amp; paperwork office</li>
   <li><b>Parking areas</b>: C – Driver rest parking; D – Trailer parking; E – Relay parking → truck trailers; F – Relay parking → solo trucks; G – Visitor parking</li>
@@ -3165,15 +3137,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>DRIVING – enter/exit the driver rest parking area</h3>
 <ul>
-  <li>After passing the gatehouse (A), drive straight to the driver rest parking area (C).</li>
-  <li>Enter the driver rest parking area through the barrier gate (L).</li>
-  <li>Go through the barrier gate (M) to exit the driver rest parking area and access the yard.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  After passing the gatehouse (A), drive straight to the driver rest parking area (C).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Enter the driver rest parking area through the barrier gate (L).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Go through the barrier gate (M) to exit the driver rest parking area and access the yard.
+</li>
 </ul>
 
 <h3>WALKING</h3>
 <ul>
-  <li><b>From the driver lounge to the office</b>: take the stairs (I) from the driver lounge (A) to the walkway, walk along the fence and follow the signs, then pass through gate (J) to reach the briefing office (B).</li>
-  <li><b>From the relay parking area to the office</b>: walk along the path with green markings next to the fence, continue straight, then pass through gate (J) to reach the briefing office (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>From the driver lounge to the office</b>: take the stairs (I) from the driver lounge (A) to the walkway, walk along the fence and follow the signs, then pass through gate (J) to reach the briefing office (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>From the relay parking area to the office</b>: walk along the path with green markings next to the fence, continue straight, then pass through gate (J) to reach the briefing office (B).
+</li>
 </ul>
 
 <h3>In case of emergency</h3>
@@ -3201,7 +3191,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Ich akzeptiere die Hofregeln",
         cont: "Weiter",
         open_pdf: "PDF in neuem Tab öffnen",
-        html: `<h3>Lageplan – wichtige Orte</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Lageplan – wichtige Orte</h3>
 <ul>
   <li><b>Büros/Fahrerbereiche</b>: A – Pförtnerhaus / Fahrerlounge; B – Fahrerbriefing &amp; Büro für Papiere</li>
   <li><b>Parkflächen</b>: C – Fahrer-Ruheparkplatz; D – Trailer-Parkplatz; E – Relay-Parkplatz → Lkw mit Trailern; F – Relay-Parkplatz → Solo-Trucks; G – Besucherparkplatz</li>
@@ -3211,15 +3202,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>FAHREN – Ein-/Ausfahrt Fahrer-Ruheparkplatz</h3>
 <ul>
-  <li>Nach dem Pförtnerhaus (A) geradeaus zum Fahrer-Ruheparkplatz (C) fahren.</li>
-  <li>Durch die Schranke (L) in den Fahrer-Ruheparkplatz einfahren.</li>
-  <li>Durch die Schranke (M) ausfahren, um den Hof zu erreichen.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Nach dem Pförtnerhaus (A) geradeaus zum Fahrer-Ruheparkplatz (C) fahren.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Durch die Schranke (L) in den Fahrer-Ruheparkplatz einfahren.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Durch die Schranke (M) ausfahren, um den Hof zu erreichen.
+</li>
 </ul>
 
 <h3>ZU FUß</h3>
 <ul>
-  <li><b>Von der Fahrerlounge zum Büro</b>: über die Treppe (I) von der Lounge (A) auf den Fußweg, am Zaun entlanggehen, Beschilderung folgen und durch Tor (J) zum Briefingbüro (B).</li>
-  <li><b>Vom Relay-Parkplatz zum Büro</b>: dem Weg mit grünen Markierungen am Zaun folgen, geradeaus weiter und durch Tor (J) zum Briefingbüro (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Von der Fahrerlounge zum Büro</b>: über die Treppe (I) von der Lounge (A) auf den Fußweg, am Zaun entlanggehen, Beschilderung folgen und durch Tor (J) zum Briefingbüro (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Vom Relay-Parkplatz zum Büro</b>: dem Weg mit grünen Markierungen am Zaun folgen, geradeaus weiter und durch Tor (J) zum Briefingbüro (B).
+</li>
 </ul>
 
 <h3>Im Notfall</h3>
@@ -3247,7 +3256,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Ik accepteer de huisregels",
         cont: "Doorgaan",
         open_pdf: "PDF openen in een nieuw tabblad",
-        html: `<h3>Plattegrond – belangrijke locaties</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Plattegrond – belangrijke locaties</h3>
 <ul>
   <li><b>Kantoren/chauffeursfaciliteiten</b>: A – Poortgebouw / chauffeurslounge; B – Chauffeursbriefing &amp; papierwerk-kantoor</li>
   <li><b>Parkeerplaatsen</b>: C – Rustparking chauffeurs; D – Trailerparking; E – Relay parking → trucks met trailers; F – Relay parking → solo trucks; G – Bezoekersparking</li>
@@ -3257,15 +3267,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>RIJDEN – in-/uitrijden rustparking chauffeurs</h3>
 <ul>
-  <li>Na het poortgebouw (A) rechtdoor naar de rustparking (C).</li>
-  <li>Rijd via de slagboom (L) de rustparking binnen.</li>
-  <li>Ga via de slagboom (M) naar buiten om het terrein op te rijden.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Na het poortgebouw (A) rechtdoor naar de rustparking (C).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Rijd via de slagboom (L) de rustparking binnen.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Ga via de slagboom (M) naar buiten om het terrein op te rijden.
+</li>
 </ul>
 
 <h3>LOPEN</h3>
 <ul>
-  <li><b>Van de lounge naar het kantoor</b>: neem de trap (I) vanuit de lounge (A) naar de looproute, loop langs het hek en volg de borden, ga daarna door poort (J) naar het briefingkantoor (B).</li>
-  <li><b>Van de relay parking naar het kantoor</b>: volg het pad met groene markeringen langs het hek, ga rechtdoor en ga door poort (J) naar het briefingkantoor (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Van de lounge naar het kantoor</b>: neem de trap (I) vanuit de lounge (A) naar de looproute, loop langs het hek en volg de borden, ga daarna door poort (J) naar het briefingkantoor (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Van de relay parking naar het kantoor</b>: volg het pad met groene markeringen langs het hek, ga rechtdoor en ga door poort (J) naar het briefingkantoor (B).
+</li>
 </ul>
 
 <h3>In geval van nood</h3>
@@ -3293,7 +3321,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "J’accepte le règlement intérieur",
         cont: "Continuer",
         open_pdf: "Ouvrir le PDF dans un nouvel onglet",
-        html: `<h3>Plan du site – lieux clés</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Plan du site – lieux clés</h3>
 <ul>
   <li><b>Bureaux / installations chauffeurs</b> : A – Poste de garde / lounge chauffeurs ; B – Briefing chauffeurs &amp; bureau des documents</li>
   <li><b>Zones de parking</b> : C – Parking repos chauffeurs ; D – Parking remorques ; E – Parking relais → tracteurs + remorques ; F – Parking relais → tracteurs seuls ; G – Parking visiteurs</li>
@@ -3303,15 +3332,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>CONDUITE – entrer/sortir du parking repos chauffeurs</h3>
 <ul>
-  <li>Après le poste de garde (A), roulez tout droit jusqu’au parking repos chauffeurs (C).</li>
-  <li>Entrez dans le parking repos chauffeurs via la barrière (L).</li>
-  <li>Passez la barrière (M) pour sortir du parking repos et accéder à la cour.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Après le poste de garde (A), roulez tout droit jusqu’au parking repos chauffeurs (C).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Entrez dans le parking repos chauffeurs via la barrière (L).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Passez la barrière (M) pour sortir du parking repos et accéder à la cour.
+</li>
 </ul>
 
 <h3>À PIED</h3>
 <ul>
-  <li><b>Du lounge au bureau</b> : prenez les escaliers (I) depuis le lounge (A) vers la passerelle, marchez le long de la clôture et suivez la signalisation, puis passez le portillon (J) pour atteindre le bureau de briefing (B).</li>
-  <li><b>Du parking relais au bureau</b> : suivez le chemin avec les marquages verts le long de la clôture, continuez tout droit, puis passez le portillon (J) pour atteindre le bureau de briefing (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Du lounge au bureau</b> : prenez les escaliers (I) depuis le lounge (A) vers la passerelle, marchez le long de la clôture et suivez la signalisation, puis passez le portillon (J) pour atteindre le bureau de briefing (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Du parking relais au bureau</b> : suivez le chemin avec les marquages verts le long de la clôture, continuez tout droit, puis passez le portillon (J) pour atteindre le bureau de briefing (B).
+</li>
 </ul>
 
 <h3>En cas d’urgence</h3>
@@ -3339,7 +3386,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Tesis kurallarını kabul ediyorum",
         cont: "Devam",
         open_pdf: "PDF’yi yeni sekmede aç",
-        html: `<h3>Saha haritası – önemli noktalar</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Saha haritası – önemli noktalar</h3>
 <ul>
   <li><b>Ofisler/şoför alanları</b>: A – Güvenlik kulübesi / şoför dinlenme alanı; B – Şoför brifingi &amp; evrak ofisi</li>
   <li><b>Park alanları</b>: C – Şoför dinlenme parkı; D – Dorse parkı; E – Röle parkı → dorse bağlı çekiciler; F – Röle parkı → solo çekiciler; G – Ziyaretçi parkı</li>
@@ -3349,15 +3397,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>SÜRÜŞ – şoför dinlenme parkına giriş/çıkış</h3>
 <ul>
-  <li>Güvenlik kulübesini (A) geçtikten sonra düz devam edip şoför dinlenme parkına (C) gidin.</li>
-  <li>Bariyer kapısından (L) geçerek dinlenme parkına girin.</li>
-  <li>Dinlenme parkından çıkıp sahaya erişmek için bariyer kapısından (M) geçin.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Güvenlik kulübesini (A) geçtikten sonra düz devam edip şoför dinlenme parkına (C) gidin.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Bariyer kapısından (L) geçerek dinlenme parkına girin.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Dinlenme parkından çıkıp sahaya erişmek için bariyer kapısından (M) geçin.
+</li>
 </ul>
 
 <h3>YÜRÜYÜŞ</h3>
 <ul>
-  <li><b>Şoför alanından ofise</b>: şoför alanından (A) merdivenleri (I) kullanarak yürüyüş yoluna çıkın, çit boyunca ilerleyip tabelaları takip edin, ardından kapıdan (J) geçerek brifing ofisine (B) ulaşın.</li>
-  <li><b>Röle parkından ofise</b>: çitin yanındaki yeşil işaretli yolu takip edin, düz devam edin, ardından kapıdan (J) geçerek brifing ofisine (B) ulaşın.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Şoför alanından ofise</b>: şoför alanından (A) merdivenleri (I) kullanarak yürüyüş yoluna çıkın, çit boyunca ilerleyip tabelaları takip edin, ardından kapıdan (J) geçerek brifing ofisine (B) ulaşın.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Röle parkından ofise</b>: çitin yanındaki yeşil işaretli yolu takip edin, düz devam edin, ardından kapıdan (J) geçerek brifing ofisine (B) ulaşın.
+</li>
 </ul>
 
 <h3>Acil durumda</h3>
@@ -3385,7 +3451,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Jag godkänner platsreglerna",
         cont: "Fortsätt",
         open_pdf: "Öppna PDF i ny flik",
-        html: `<h3>Karta – viktiga platser</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Karta – viktiga platser</h3>
 <ul>
   <li><b>Kontor/förarfaciliteter</b>: A – Vakthus / förarlounge; B – Förarbriefing &amp; kontor för dokument</li>
   <li><b>Parkeringsområden</b>: C – Förarviloparkering; D – Släpparkering; E – Relay-parkering → dragbil + släp; F – Relay-parkering → enbart dragbil; G – Besöksparkering</li>
@@ -3395,15 +3462,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>KÖRNING – in/ut från förarviloparkeringen</h3>
 <ul>
-  <li>Efter vakthuset (A), kör rakt fram till förarviloparkeringen (C).</li>
-  <li>Kör in på förarviloparkeringen via bommen (L).</li>
-  <li>Passera bommen (M) för att lämna förarviloparkeringen och komma ut på gården.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Efter vakthuset (A), kör rakt fram till förarviloparkeringen (C).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Kör in på förarviloparkeringen via bommen (L).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Passera bommen (M) för att lämna förarviloparkeringen och komma ut på gården.
+</li>
 </ul>
 
 <h3>GÅNG</h3>
 <ul>
-  <li><b>Från loungen till kontoret</b>: ta trapporna (I) från loungen (A) till gångvägen, gå längs stängslet och följ skyltarna, passera sedan grinden (J) till briefingkontoret (B).</li>
-  <li><b>Från relay-parkeringen till kontoret</b>: följ vägen med gröna markeringar längs stängslet, fortsätt rakt fram och passera grinden (J) till briefingkontoret (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Från loungen till kontoret</b>: ta trapporna (I) från loungen (A) till gångvägen, gå längs stängslet och följ skyltarna, passera sedan grinden (J) till briefingkontoret (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Från relay-parkeringen till kontoret</b>: följ vägen med gröna markeringar längs stängslet, fortsätt rakt fram och passera grinden (J) till briefingkontoret (B).
+</li>
 </ul>
 
 <h3>Vid nödsituation</h3>
@@ -3431,7 +3516,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Acepto las normas del sitio",
         cont: "Continuar",
         open_pdf: "Abrir PDF en una pestaña nueva",
-        html: `<h3>Mapa del sitio – ubicaciones clave</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Mapa del sitio – ubicaciones clave</h3>
 <ul>
   <li><b>Oficinas/instalaciones para conductores</b>: A – Garita / sala de conductores; B – Oficina de briefing y documentación</li>
   <li><b>Zonas de aparcamiento</b>: C – Aparcamiento de descanso; D – Aparcamiento de remolques; E – Aparcamiento relay → camión con remolque; F – Aparcamiento relay → camión solo; G – Aparcamiento de visitantes</li>
@@ -3441,15 +3527,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>CONDUCCIÓN – entrar/salir del aparcamiento de descanso</h3>
 <ul>
-  <li>Después de la garita (A), conduzca recto hasta el aparcamiento de descanso (C).</li>
-  <li>Entre al aparcamiento de descanso por la barrera (L).</li>
-  <li>Pase por la barrera (M) para salir del aparcamiento de descanso y acceder al patio.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Después de la garita (A), conduzca recto hasta el aparcamiento de descanso (C).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Entre al aparcamiento de descanso por la barrera (L).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Pase por la barrera (M) para salir del aparcamiento de descanso y acceder al patio.
+</li>
 </ul>
 
 <h3>A PIE</h3>
 <ul>
-  <li><b>De la sala a la oficina</b>: use las escaleras (I) desde la sala (A) hacia la pasarela, camine junto a la valla y siga las señales, luego pase por la puerta (J) para llegar a la oficina de briefing (B).</li>
-  <li><b>Del aparcamiento relay a la oficina</b>: siga el camino con marcas verdes junto a la valla, continúe recto y pase por la puerta (J) para llegar a la oficina de briefing (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>De la sala a la oficina</b>: use las escaleras (I) desde la sala (A) hacia la pasarela, camine junto a la valla y siga las señales, luego pase por la puerta (J) para llegar a la oficina de briefing (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Del aparcamiento relay a la oficina</b>: siga el camino con marcas verdes junto a la valla, continúe recto y pase por la puerta (J) para llegar a la oficina de briefing (B).
+</li>
 </ul>
 
 <h3>En caso de emergencia</h3>
@@ -3477,7 +3581,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Accetto il regolamento del sito",
         cont: "Continua",
         open_pdf: "Apri il PDF in una nuova scheda",
-        html: `<h3>Mappa del sito – posizioni chiave</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Mappa del sito – posizioni chiave</h3>
 <ul>
   <li><b>Uffici/servizi autisti</b>: A – Guardhouse / lounge autisti; B – Briefing autisti &amp; ufficio documenti</li>
   <li><b>Aree di parcheggio</b>: C – Parcheggio riposo autisti; D – Parcheggio rimorchi; E – Parcheggio relay → camion con rimorchio; F – Parcheggio relay → camion solo; G – Parcheggio visitatori</li>
@@ -3487,15 +3592,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>GUIDA – entrare/uscire dal parcheggio riposo autisti</h3>
 <ul>
-  <li>Dopo la guardhouse (A), prosegui dritto fino al parcheggio riposo (C).</li>
-  <li>Entra nel parcheggio riposo passando dalla barriera (L).</li>
-  <li>Passa la barriera (M) per uscire dal parcheggio riposo e accedere al cortile.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Dopo la guardhouse (A), prosegui dritto fino al parcheggio riposo (C).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Entra nel parcheggio riposo passando dalla barriera (L).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Passa la barriera (M) per uscire dal parcheggio riposo e accedere al cortile.
+</li>
 </ul>
 
 <h3>A PIEDI</h3>
 <ul>
-  <li><b>Dalla lounge all’ufficio</b>: usa le scale (I) dalla lounge (A) alla passerella, cammina lungo la recinzione seguendo i cartelli, poi attraversa il cancello (J) per arrivare all’ufficio briefing (B).</li>
-  <li><b>Dal parcheggio relay all’ufficio</b>: segui il percorso con segnaletica verde lungo la recinzione, continua dritto e attraversa il cancello (J) per arrivare all’ufficio briefing (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Dalla lounge all’ufficio</b>: usa le scale (I) dalla lounge (A) alla passerella, cammina lungo la recinzione seguendo i cartelli, poi attraversa il cancello (J) per arrivare all’ufficio briefing (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Dal parcheggio relay all’ufficio</b>: segui il percorso con segnaletica verde lungo la recinzione, continua dritto e attraversa il cancello (J) per arrivare all’ufficio briefing (B).
+</li>
 </ul>
 
 <h3>In caso di emergenza</h3>
@@ -3523,7 +3646,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Accept regulamentul (house rules)",
         cont: "Continuă",
         open_pdf: "Deschide PDF-ul într-un tab nou",
-        html: `<h3>Harta site-ului – locații cheie</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Harta site-ului – locații cheie</h3>
 <ul>
   <li><b>Birouri/facilități șoferi</b>: A – Poartă / lounge șoferi; B – Briefing șoferi &amp; birou documente</li>
   <li><b>Parcări</b>: C – Parcare odihnă șoferi; D – Parcare remorci; E – Parcare relay → cap tractor + remorcă; F – Parcare relay → cap tractor singur; G – Parcare vizitatori</li>
@@ -3533,15 +3657,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>CONDUS – intrare/ieșire parcare odihnă șoferi</h3>
 <ul>
-  <li>După punctul de control (A), mergeți drept până la parcarea de odihnă (C).</li>
-  <li>Intrați în parcarea de odihnă prin bariera (L).</li>
-  <li>Treceți prin bariera (M) pentru a ieși din parcare și a accesa curtea.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  După punctul de control (A), mergeți drept până la parcarea de odihnă (C).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Intrați în parcarea de odihnă prin bariera (L).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Treceți prin bariera (M) pentru a ieși din parcare și a accesa curtea.
+</li>
 </ul>
 
 <h3>PE JOS</h3>
 <ul>
-  <li><b>Din lounge la birou</b>: urcați scările (I) din lounge (A) pe pasarelă, mergeți pe lângă gard și urmați indicatoarele, apoi treceți prin poarta (J) către biroul de briefing (B).</li>
-  <li><b>Din parcarea relay la birou</b>: urmați traseul cu marcaje verzi lângă gard, continuați drept, apoi treceți prin poarta (J) către biroul de briefing (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Din lounge la birou</b>: urcați scările (I) din lounge (A) pe pasarelă, mergeți pe lângă gard și urmați indicatoarele, apoi treceți prin poarta (J) către biroul de briefing (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Din parcarea relay la birou</b>: urmați traseul cu marcaje verzi lângă gard, continuați drept, apoi treceți prin poarta (J) către biroul de briefing (B).
+</li>
 </ul>
 
 <h3>În caz de urgență</h3>
@@ -3569,7 +3711,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Я принимаю правила площадки",
         cont: "Продолжить",
         open_pdf: "Открыть PDF в новой вкладке",
-        html: `<h3>Схема площадки – ключевые места</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Схема площадки – ключевые места</h3>
 <ul>
   <li><b>Офисы/зоны для водителей</b>: A – КПП / лаунж для водителей; B – Офис брифинга и документов</li>
   <li><b>Парковки</b>: C – Парковка отдыха водителей; D – Парковка прицепов; E – Relay-парковка → тягач с прицепом; F – Relay-парковка → тягач без прицепа; G – Парковка для посетителей</li>
@@ -3579,15 +3722,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>ДВИЖЕНИЕ – въезд/выезд на парковку отдыха водителей</h3>
 <ul>
-  <li>Проехав КПП (A), двигайтесь прямо к парковке отдыха (C).</li>
-  <li>Въезд на парковку отдыха через шлагбаум (L).</li>
-  <li>Для выезда и доступа во двор проезжайте через шлагбаум (M).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Проехав КПП (A), двигайтесь прямо к парковке отдыха (C).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Въезд на парковку отдыха через шлагбаум (L).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Для выезда и доступа во двор проезжайте через шлагбаум (M).
+</li>
 </ul>
 
 <h3>ПЕШКОМ</h3>
 <ul>
-  <li><b>Из лаунжа в офис</b>: поднимитесь по лестнице (I) из лаунжа (A) на проход, идите вдоль забора и следуйте указателям, затем пройдите через ворота (J) к офису брифинга (B).</li>
-  <li><b>С relay-парковки в офис</b>: идите по дорожке с зелёной разметкой вдоль забора, продолжайте прямо и пройдите через ворота (J) к офису брифинга (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Из лаунжа в офис</b>: поднимитесь по лестнице (I) из лаунжа (A) на проход, идите вдоль забора и следуйте указателям, затем пройдите через ворота (J) к офису брифинга (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>С relay-парковки в офис</b>: идите по дорожке с зелёной разметкой вдоль забора, продолжайте прямо и пройдите через ворота (J) к офису брифинга (B).
+</li>
 </ul>
 
 <h3>В экстренной ситуации</h3>
@@ -3615,7 +3776,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Sutinku su aikštelės taisyklėmis",
         cont: "Tęsti",
         open_pdf: "Atidaryti PDF naujame skirtuke",
-        html: `<h3>Aikštelės žemėlapis – pagrindinės vietos</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Aikštelės žemėlapis – pagrindinės vietos</h3>
 <ul>
   <li><b>Biurai / vairuotojų patalpos</b>: A – Sargybinė / vairuotojų poilsio zona; B – Vairuotojų instruktažas &amp; dokumentų biuras</li>
   <li><b>Parkavimo zonos</b>: C – Vairuotojų poilsio parkavimas; D – Priekabų parkavimas; E – Relay parkavimas → vilkikas su priekaba; F – Relay parkavimas → vilkikas be priekabos; G – Lankytojų parkavimas</li>
@@ -3625,15 +3787,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>VAŽIAVIMAS – įvažiavimas/išvažiavimas iš vairuotojų poilsio parkavimo</h3>
 <ul>
-  <li>Praėjus sargybinei (A), važiuokite tiesiai į vairuotojų poilsio parkavimą (C).</li>
-  <li>Įvažiuokite per užtvarą (L).</li>
-  <li>Norėdami išvažiuoti ir patekti į kiemą, pravažiuokite per užtvarą (M).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Praėjus sargybinei (A), važiuokite tiesiai į vairuotojų poilsio parkavimą (C).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Įvažiuokite per užtvarą (L).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Norėdami išvažiuoti ir patekti į kiemą, pravažiuokite per užtvarą (M).
+</li>
 </ul>
 
 <h3>EJIMAS PĖSČIOMIS</h3>
 <ul>
-  <li><b>Iš poilsio zonos į biurą</b>: lipkite laiptais (I) iš zonos (A) į taką, eikite palei tvorą ir sekite ženklus, tada praeikite pro vartelius (J) iki briefing biuro (B).</li>
-  <li><b>Iš relay parkavimo į biurą</b>: eikite taku su žaliomis žymomis palei tvorą, eikite tiesiai ir praeikite pro vartelius (J) iki briefing biuro (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Iš poilsio zonos į biurą</b>: lipkite laiptais (I) iš zonos (A) į taką, eikite palei tvorą ir sekite ženklus, tada praeikite pro vartelius (J) iki briefing biuro (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Iš relay parkavimo į biurą</b>: eikite taku su žaliomis žymomis palei tvorą, eikite tiesiai ir praeikite pro vartelius (J) iki briefing biuro (B).
+</li>
 </ul>
 
 <h3>Avarijos atveju</h3>
@@ -3661,7 +3841,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Мен алаң ережелерін қабылдаймын",
         cont: "Жалғастыру",
         open_pdf: "PDF-ті жаңа қойындыда ашу",
-        html: `<h3>Алаң картасы – негізгі орындар</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Алаң картасы – негізгі орындар</h3>
 <ul>
   <li><b>Кеңсе/жүргізуші аймақтары</b>: A – Күзет бекеті / жүргізуші лаунжы; B – Брифинг және құжаттар кеңсесі</li>
   <li><b>Тұрақ аймақтары</b>: C – Жүргізуші демалыс тұрағы; D – Тіркеме тұрағы; E – Relay тұрағы → тіркемесі бар тартқыш; F – Relay тұрағы → жеке тартқыш; G – Келушілер тұрағы</li>
@@ -3671,15 +3852,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>КӨЛІКПЕН – демалыс тұрағына кіру/шығу</h3>
 <ul>
-  <li>Күзет бекетінен (A) өткен соң, демалыс тұрағына (C) дейін түзу жүріңіз.</li>
-  <li>Шлагбаум (L) арқылы демалыс тұрағына кіріңіз.</li>
-  <li>Аулаға шығу үшін шлагбаумнан (M) өтіңіз.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Күзет бекетінен (A) өткен соң, демалыс тұрағына (C) дейін түзу жүріңіз.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Шлагбаум (L) арқылы демалыс тұрағына кіріңіз.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Аулаға шығу үшін шлагбаумнан (M) өтіңіз.
+</li>
 </ul>
 
 <h3>ЖАЯУ</h3>
 <ul>
-  <li><b>Лаунждан кеңсеге</b>: лаунждан (A) баспалдақпен (I) жаяу жолға шығып, қоршау бойымен жүріп, белгілерді қадағалаңыз, содан кейін қақпадан (J) өтіп брифинг кеңсесіне (B) барыңыз.</li>
-  <li><b>Relay тұрағынан кеңсеге</b>: қоршау жанындағы жасыл белгіленген жолмен жүріңіз, түзу жалғастырыңыз, содан кейін қақпадан (J) өтіп брифинг кеңсесіне (B) барыңыз.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Лаунждан кеңсеге</b>: лаунждан (A) баспалдақпен (I) жаяу жолға шығып, қоршау бойымен жүріп, белгілерді қадағалаңыз, содан кейін қақпадан (J) өтіп брифинг кеңсесіне (B) барыңыз.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Relay тұрағынан кеңсеге</b>: қоршау жанындағы жасыл белгіленген жолмен жүріңіз, түзу жалғастырыңыз, содан кейін қақпадан (J) өтіп брифинг кеңсесіне (B) барыңыз.
+</li>
 </ul>
 
 <h3>Төтенше жағдайда</h3>
@@ -3707,7 +3906,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "मैं साइट के नियम स्वीकार करता/करती हूँ",
         cont: "जारी रखें",
         open_pdf: "PDF नई टैब में खोलें",
-        html: `<h3>साइट मैप – प्रमुख स्थान</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>साइट मैप – प्रमुख स्थान</h3>
 <ul>
   <li><b>ऑफिस/ड्राइवर सुविधाएँ</b>: A – गेटहाउस / ड्राइवर लाउंज; B – ड्राइवर ब्रीफिंग और दस्तावेज़ कार्यालय</li>
   <li><b>पार्किंग क्षेत्र</b>: C – ड्राइवर रेस्ट पार्किंग; D – ट्रेलर पार्किंग; E – रिले पार्किंग → ट्रक + ट्रेलर; F – रिले पार्किंग → केवल ट्रक; G – विज़िटर पार्किंग</li>
@@ -3717,15 +3917,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>ड्राइविंग – ड्राइवर रेस्ट पार्किंग में प्रवेश/निकास</h3>
 <ul>
-  <li>गेटहाउस (A) के बाद सीधे ड्राइवर रेस्ट पार्किंग (C) तक जाएँ।</li>
-  <li>बैARRIER गेट (L) से होकर पार्किंग में प्रवेश करें।</li>
-  <li>यार्ड तक पहुँचने के लिए बैARRIER गेट (M) से होकर बाहर निकलें।</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  गेटहाउस (A) के बाद सीधे ड्राइवर रेस्ट पार्किंग (C) तक जाएँ।
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  बैARRIER गेट (L) से होकर पार्किंग में प्रवेश करें।
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  यार्ड तक पहुँचने के लिए बैARRIER गेट (M) से होकर बाहर निकलें।
+</li>
 </ul>
 
 <h3>पैदल</h3>
 <ul>
-  <li><b>ड्राइवर लाउंज से ऑफिस</b>: लाउंज (A) से सीढ़ियाँ (I) लेकर वॉकवे पर जाएँ, बाड़ के साथ चलते हुए संकेतों का पालन करें, फिर गेट (J) से होकर ब्रीफिंग ऑफिस (B) पहुँचें।</li>
-  <li><b>रिले पार्किंग से ऑफिस</b>: बाड़ के पास हरे निशान वाले रास्ते पर चलें, सीधे आगे बढ़ें, फिर गेट (J) से होकर ब्रीफिंग ऑफिस (B) पहुँचें।</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>ड्राइवर लाउंज से ऑफिस</b>: लाउंज (A) से सीढ़ियाँ (I) लेकर वॉकवे पर जाएँ, बाड़ के साथ चलते हुए संकेतों का पालन करें, फिर गेट (J) से होकर ब्रीफिंग ऑफिस (B) पहुँचें।
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>रिले पार्किंग से ऑफिस</b>: बाड़ के पास हरे निशान वाले रास्ते पर चलें, सीधे आगे बढ़ें, फिर गेट (J) से होकर ब्रीफिंग ऑफिस (B) पहुँचें।
+</li>
 </ul>
 
 <h3>आपात स्थिति में</h3>
@@ -3753,7 +3971,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Akceptuję regulamin terenu",
         cont: "Dalej",
         open_pdf: "Otwórz PDF w nowej karcie",
-        html: `<h3>Mapa terenu – kluczowe miejsca</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Mapa terenu – kluczowe miejsca</h3>
 <ul>
   <li><b>Biura/strefy kierowców</b>: A – Portiernia / lounge kierowców; B – Biuro briefingu i dokumentów</li>
   <li><b>Parkingi</b>: C – Parking odpoczynku kierowców; D – Parking naczep; E – Parking relay → ciągnik z naczepą; F – Parking relay → sam ciągnik; G – Parking dla gości</li>
@@ -3763,15 +3982,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>JAZDA – wjazd/wyjazd z parkingu odpoczynku</h3>
 <ul>
-  <li>Po minięciu portierni (A) jedź prosto do parkingu odpoczynku (C).</li>
-  <li>Wjedź na parking przez szlaban (L).</li>
-  <li>Aby wyjechać i dostać się na plac, przejedź przez szlaban (M).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Po minięciu portierni (A) jedź prosto do parkingu odpoczynku (C).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Wjedź na parking przez szlaban (L).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Aby wyjechać i dostać się na plac, przejedź przez szlaban (M).
+</li>
 </ul>
 
 <h3>PIESZO</h3>
 <ul>
-  <li><b>Z lounge do biura</b>: wejdź schodami (I) z lounge (A) na kładkę, idź wzdłuż ogrodzenia i kieruj się znakami, następnie przejdź przez bramę (J) do biura briefingu (B).</li>
-  <li><b>Z parkingu relay do biura</b>: idź ścieżką z zielonymi oznaczeniami przy ogrodzeniu, idź prosto, następnie przejdź przez bramę (J) do biura briefingu (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Z lounge do biura</b>: wejdź schodami (I) z lounge (A) na kładkę, idź wzdłuż ogrodzenia i kieruj się znakami, następnie przejdź przez bramę (J) do biura briefingu (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Z parkingu relay do biura</b>: idź ścieżką z zielonymi oznaczeniami przy ogrodzeniu, idź prosto, następnie przejdź przez bramę (J) do biura briefingu (B).
+</li>
 </ul>
 
 <h3>W sytuacji awaryjnej</h3>
@@ -3799,7 +4036,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Elfogadom a házirendet",
         cont: "Tovább",
         open_pdf: "PDF megnyitása új lapon",
-        html: `<h3>Telephely térkép – kulcs helyszínek</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Telephely térkép – kulcs helyszínek</h3>
 <ul>
   <li><b>Irodák/sofőr létesítmények</b>: A – Kapuőrház / sofőr pihenő; B – Sofőr briefing &amp; papírmunka iroda</li>
   <li><b>Parkolók</b>: C – Sofőr pihenő parkoló; D – Pótkocsi parkoló; E – Relay parkoló → vontató + pótkocsi; F – Relay parkoló → solo vontató; G – Látogatói parkoló</li>
@@ -3809,15 +4047,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>VEZETÉS – sofőr pihenő parkoló be/ki</h3>
 <ul>
-  <li>A kapuőrház (A) után hajts egyenesen a sofőr pihenő parkolóba (C).</li>
-  <li>A sorompón (L) keresztül hajts be a pihenő parkolóba.</li>
-  <li>Az udvar eléréséhez hajts át a sorompón (M) és hagyd el a pihenő parkolót.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  A kapuőrház (A) után hajts egyenesen a sofőr pihenő parkolóba (C).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  A sorompón (L) keresztül hajts be a pihenő parkolóba.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Az udvar eléréséhez hajts át a sorompón (M) és hagyd el a pihenő parkolót.
+</li>
 </ul>
 
 <h3>GYALOG</h3>
 <ul>
-  <li><b>A pihenőből az irodába</b>: menj fel a lépcsőn (I) a pihenőből (A) a sétányra, haladj a kerítés mellett és kövesd a táblákat, majd menj át a kapun (J) a briefing irodához (B).</li>
-  <li><b>A relay parkolóból az irodába</b>: kövesd a zöld jelölésű utat a kerítés mellett, menj egyenesen, majd menj át a kapun (J) a briefing irodához (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>A pihenőből az irodába</b>: menj fel a lépcsőn (I) a pihenőből (A) a sétányra, haladj a kerítés mellett és kövesd a táblákat, majd menj át a kapun (J) a briefing irodához (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>A relay parkolóból az irodába</b>: kövesd a zöld jelölésű utat a kerítés mellett, menj egyenesen, majd menj át a kapun (J) a briefing irodához (B).
+</li>
 </ul>
 
 <h3>Vészhelyzet esetén</h3>
@@ -3845,7 +4101,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Men hudud qoidalarini qabul qilaman",
         cont: "Davom etish",
         open_pdf: "PDF-ni yangi yorliqda ochish",
-        html: `<h3>Hudud xaritasi – muhim joylar</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Hudud xaritasi – muhim joylar</h3>
 <ul>
   <li><b>Ofislar/haydovchi hududi</b>: A – Qo‘riqlash punkti / haydovchilar dam olish joyi; B – Brifing va hujjatlar ofisi</li>
   <li><b>To‘xtash joylari</b>: C – Haydovchilar dam olish parkingi; D – Tirkama parkingi; E – Relay parking → yuk mashinasi+tirkama; F – Relay parking → solo yuk mashinasi; G – Mehmonlar parkingi</li>
@@ -3855,15 +4112,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>HAYDASH – dam olish parkingiga kirish/chiqish</h3>
 <ul>
-  <li>Qo‘riqlash punktidan (A) o‘tgach, to‘g‘ri yurib dam olish parkingiga (C) boring.</li>
-  <li>To‘siq darvoza (L) orqali parkingga kiring.</li>
-  <li>Hududga chiqish uchun to‘siq darvoza (M) orqali o‘ting.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Qo‘riqlash punktidan (A) o‘tgach, to‘g‘ri yurib dam olish parkingiga (C) boring.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  To‘siq darvoza (L) orqali parkingga kiring.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Hududga chiqish uchun to‘siq darvoza (M) orqali o‘ting.
+</li>
 </ul>
 
 <h3>PIYODA</h3>
 <ul>
-  <li><b>Dam olish joyidan ofisga</b>: dam olish joyidan (A) zinapoya (I) orqali yo‘lakka chiqing, panjara bo‘ylab yuring va belgilarga amal qiling, so‘ng darvozadan (J) o‘tib brifing ofisiga (B) boring.</li>
-  <li><b>Relay parkingdan ofisga</b>: panjara yonidagi yashil belgilangan yo‘ldan yuring, to‘g‘ri davom eting, so‘ng darvozadan (J) o‘tib brifing ofisiga (B) boring.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Dam olish joyidan ofisga</b>: dam olish joyidan (A) zinapoya (I) orqali yo‘lakka chiqing, panjara bo‘ylab yuring va belgilarga amal qiling, so‘ng darvozadan (J) o‘tib brifing ofisiga (B) boring.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Relay parkingdan ofisga</b>: panjara yonidagi yashil belgilangan yo‘ldan yuring, to‘g‘ri davom eting, so‘ng darvozadan (J) o‘tib brifing ofisiga (B) boring.
+</li>
 </ul>
 
 <h3>Favqulodda holatda</h3>
@@ -3891,7 +4166,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Ман қоидаҳои маҳалро қабул мекунам",
         cont: "Идома",
         open_pdf: "PDF-ро дар ҷадвали нав кушоед",
-        html: `<h3>Нақшаи маҳал – ҷойҳои муҳим</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Нақшаи маҳал – ҷойҳои муҳим</h3>
 <ul>
   <li><b>Идора/шароити ронандагон</b>: A – Посбонхона / лонҷи ронанда; B – Офиси брифинг ва ҳуҷҷатҳо</li>
   <li><b>Майдони таваққуф</b>: C – Таваққуфи истироҳати ронанда; D – Таваққуфи прицепҳо; E – Relay таваққуф → мошин бо прицеп; F – Relay таваққуф → мошини танҳо; G – Таваққуфи меҳмонон</li>
@@ -3901,15 +4177,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>РОНДАН – даромад/баромад аз таваққуфи истироҳат</h3>
 <ul>
-  <li>Пас аз посбонхона (A) рост ба таваққуфи истироҳат (C) равед.</li>
-  <li>Аз монеа (L) гузашта ба таваққуф дароед.</li>
-  <li>Барои баромадан ва ба ҳавлӣ расидан аз монеа (M) гузаред.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Пас аз посбонхона (A) рост ба таваққуфи истироҳат (C) равед.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Аз монеа (L) гузашта ба таваққуф дароед.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Барои баромадан ва ба ҳавлӣ расидан аз монеа (M) гузаред.
+</li>
 </ul>
 
 <h3>ПИЁДА</h3>
 <ul>
-  <li><b>Аз лонҷ ба идора</b>: аз лонҷ (A) бо зинапоя (I) ба роҳрав бароед, дар канори девор (панҷара) қадам занед ва нишонаҳоро пайравӣ кунед, сипас аз дарвоза (J) гузашта ба офиси брифинг (B) расед.</li>
-  <li><b>Аз relay таваққуф ба идора</b>: роҳро бо аломатҳои сабз дар канори панҷара пайравӣ кунед, рост идома диҳед ва аз дарвоза (J) гузашта ба офиси брифинг (B) расед.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Аз лонҷ ба идора</b>: аз лонҷ (A) бо зинапоя (I) ба роҳрав бароед, дар канори девор (панҷара) қадам занед ва нишонаҳоро пайравӣ кунед, сипас аз дарвоза (J) гузашта ба офиси брифинг (B) расед.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Аз relay таваққуф ба идора</b>: роҳро бо аломатҳои сабз дар канори панҷара пайравӣ кунед, рост идома диҳед ва аз дарвоза (J) гузашта ба офиси брифинг (B) расед.
+</li>
 </ul>
 
 <h3>Дар ҳолати фавқулода</h3>
@@ -3937,7 +4231,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Мен аянттын эрежелерин кабыл алам",
         cont: "Улантуу",
         open_pdf: "PDFти жаңы өтмөктө ачуу",
-        html: `<h3>Аянт картасы – негизги жерлер</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Аянт картасы – негизги жерлер</h3>
 <ul>
   <li><b>Офис/айдоочулар үчүн жайлар</b>: A – Күзөт пункту / айдоочу лаунжу; B – Брифинг жана документтер офиси</li>
   <li><b>Токтотмо жайлар</b>: C – Айдоочу эс алуу паркинги; D – Прицеп паркинги; E – Relay паркинги → прицептүү тягач; F – Relay паркинги → жалгыз тягач; G – Коноктор паркинги</li>
@@ -3947,15 +4242,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>АЙДОО – эс алуу паркингине кирүү/чыгуу</h3>
 <ul>
-  <li>Күзөт пунктунан (A) өткөндөн кийин түз эле эс алуу паркингине (C) айдаңыз.</li>
-  <li>Шлагбаум (L) аркылуу паркингге кириңиз.</li>
-  <li>Аянтка чыгуу үчүн шлагбаумдан (M) өтүңүз.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Күзөт пунктунан (A) өткөндөн кийин түз эле эс алуу паркингине (C) айдаңыз.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Шлагбаум (L) аркылуу паркингге кириңиз.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Аянтка чыгуу үчүн шлагбаумдан (M) өтүңүз.
+</li>
 </ul>
 
 <h3>ЖӨӨ</h3>
 <ul>
-  <li><b>Лаунждан офиске</b>: лаунждан (A) тепкич (I) менен жөө жолго чыгып, тосмонун жанынан жүрүп белгилерди ээрчиңиз, андан кийин дарбазадан (J) өтүп брифинг офисине (B) барыңыз.</li>
-  <li><b>Relay паркингинен офиске</b>: тосмонун жанындагы жашыл белгилүү жол менен жүрүңүз, түз улантыңыз, анан дарбазадан (J) өтүп брифинг офисине (B) барыңыз.</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>Лаунждан офиске</b>: лаунждан (A) тепкич (I) менен жөө жолго чыгып, тосмонун жанынан жүрүп белгилерди ээрчиңиз, андан кийин дарбазадан (J) өтүп брифинг офисине (B) барыңыз.
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>Relay паркингинен офиске</b>: тосмонун жанындагы жашыл белгилүү жол менен жүрүңүз, түз улантыңыз, анан дарбазадан (J) өтүп брифинг офисине (B) барыңыз.
+</li>
 </ul>
 
 <h3>Өзгөчө кырдаалда</h3>
@@ -3983,7 +4296,8 @@ INDEX_HTML = r"""<!doctype html>
         accept: "Я прымаю правілы пляцоўкі",
         cont: "Працягнуць",
         open_pdf: "Адкрыць PDF у новай укладцы",
-        html: `<h3>Карта пляцоўкі – ключавыя месцы</h3>
+        html: `<img class="hr-img" src="/static/house_rules/01_site_map.png" alt="Site map" />
+<h3>Карта пляцоўкі – ключавыя месцы</h3>
 <ul>
   <li><b>Офіс/зоны кіроўцаў</b>: A – Прапускны пункт / лаунж кіроўцаў; B – Офіс брыфінгу і дакументаў</li>
   <li><b>Паркоўкі</b>: C – Паркоўка адпачынку кіроўцаў; D – Паркоўка прычэпаў; E – Relay-паркоўка → цягач з прычэпам; F – Relay-паркоўка → цягач без прычэпа; G – Паркоўка для наведвальнікаў</li>
@@ -3993,15 +4307,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <h3>РУХ – уезд/выезд на паркоўку адпачынку</h3>
 <ul>
-  <li>Пасля КПП (A) рухайцеся прама да паркоўкі адпачынку (C).</li>
-  <li>Уезд на паркоўку праз шлагбаум (L).</li>
-  <li>Каб выехаць і трапіць у двор, праязджайце праз шлагбаум (M).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/02_after_gatehouse.png" alt="After passing the gatehouse" />
+  Пасля КПП (A) рухайцеся прама да паркоўкі адпачынку (C).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/03_enter_driver_rest_parking.png" alt="Enter the driver rest parking area" />
+  Уезд на паркоўку праз шлагбаум (L).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/04_go_through_barrier_gate.png" alt="Go through the barrier gate" />
+  Каб выехаць і трапіць у двор, праязджайце праз шлагбаум (M).
+</li>
 </ul>
 
 <h3>ПЕШКІ</h3>
 <ul>
-  <li><b>З лаунжа ў офіс</b>: падыміцеся па лесвіцы (I) з лаунжа (A) на праход, ідзіце ўздоўж плота і па ўказальніках, затым прайдзіце праз браму (J) да офіса брыфінгу (B).</li>
-  <li><b>З relay-паркоўкі ў офіс</b>: ідзіце па дарожцы з зялёнай разметкай уздоўж плота, працягвайце прама і прайдзіце праз браму (J) да офіса брыфінгу (B).</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/05_stairs_leading_from.png" alt="Stairs leading from" />
+  <img class="hr-img" src="/static/house_rules/06_walk_along_fence.png" alt="Walk along the fence" />
+  <img class="hr-img" src="/static/house_rules/07_pass_through_gate.png" alt="Pass through the gate" />
+  <b>З лаунжа ў офіс</b>: падыміцеся па лесвіцы (I) з лаунжа (A) на праход, ідзіце ўздоўж плота і па ўказальніках, затым прайдзіце праз браму (J) да офіса брыфінгу (B).
+</li>
+  <li>
+  <img class="hr-img" src="/static/house_rules/08_walk_along_path.png" alt="Walk along the path" />
+  <img class="hr-img" src="/static/house_rules/09_continue_straight.png" alt="Continue straight" />
+  <b>З relay-паркоўкі ў офіс</b>: ідзіце па дарожцы з зялёнай разметкай уздоўж плота, працягвайце прама і прайдзіце праз браму (J) да офіса брыфінгу (B).
+</li>
 </ul>
 
 <h3>У выпадку надзвычайнай сітуацыі</h3>
@@ -4036,8 +4368,7 @@ INDEX_HTML = r"""<!doctype html>
       const titleEl = document.getElementById("hrTitle");
       const introEl = document.getElementById("hrIntro");
       const textEl = document.getElementById("hrText");
-      const openEl = document.getElementById("hrOpenPdf");
-      const acceptEl = document.getElementById("hrAccept");
+const acceptEl = document.getElementById("hrAccept");
       const acceptLabelEl = document.getElementById("hrAcceptLabel");
       const contBtn = document.getElementById("hrContinue");
 
@@ -4045,8 +4376,7 @@ INDEX_HTML = r"""<!doctype html>
       introEl.textContent = pack.intro || "";
       acceptLabelEl.textContent = pack.accept || "I accept";
       contBtn.textContent = pack.cont || "Continue";
-      openEl.textContent = pack.open_pdf || "Open PDF";
-      textEl.innerHTML = pack.html || "";
+textEl.innerHTML = pack.html || "";
 
       acceptEl.checked = false;
       contBtn.disabled = true;
