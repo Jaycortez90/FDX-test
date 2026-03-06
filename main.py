@@ -148,6 +148,7 @@ SNAPSHOT: Optional[Dict[str, Any]] = None
 LAST_STATUS_KEY_BY_PLATE: Dict[str, str] = {}
 SUBSCRIPTIONS_BY_PLATE: Dict[str, List[Dict[str, Any]]] = {}
 MANUAL_STATUS_BY_PLATE: Dict[str, str] = {}
+MESSAGE_ACK_BY_PLATE: Dict[str, Dict[str, Any]] = {}  # plate -> {ack_at:str, source:str}
 VIEWED_BY_PLATE: Dict[str, Dict[str, Any]] = {}  # plate -> {count:int, last_view:str}
 HOUSE_RULES_ACCEPTED_BY_PLATE: Dict[str, str] = {}  # plate -> ISO timestamp (in-memory, resets on restart)
 STATUS_POLL_INTERVAL_SECONDS = 30
@@ -671,6 +672,34 @@ def route_note_text(route_key: str, lang: str = "en") -> str:
     rk = str(route_key or "").strip().upper()
     table = _I18N_ROUTE_NOTE.get(l) or _I18N_ROUTE_NOTE["en"]
     return table.get(rk, _I18N_ROUTE_NOTE["en"].get(rk, ""))
+
+
+_I18N_GOT_IT: Dict[str, str] = {
+    "en": "Got it",
+    "de": "Verstanden",
+    "nl": "Begrepen",
+    "fr": "Compris",
+    "tr": "Anladım",
+    "sv": "Jag förstår",
+    "es": "Entendido",
+    "it": "Capito",
+    "ro": "Am înțeles",
+    "ru": "Понятно",
+    "lt": "Supratau",
+    "kk": "Түсіндім",
+    "hi": "समझ गया",
+    "pl": "Rozumiem",
+    "hu": "Értettem",
+    "uz": "Tushundim",
+    "tg": "Фаҳмидам",
+    "ky": "Түшүндүм",
+    "be": "Зразумела",
+}
+
+
+def got_it_text(lang: str = "en") -> str:
+    l = normalize_lang(lang)
+    return _I18N_GOT_IT.get(l, _I18N_GOT_IT["en"])
 
 
 def push_title_text(title_key: str, lang: str = "en") -> str:
@@ -1287,6 +1316,36 @@ def _maybe_admin_push_status_change(plate: str, movement: Dict[str, Any]) -> Non
 
 
 
+def _maybe_admin_push_message_acknowledged(plate: str) -> None:
+    """Push to admin subscription bucket when a driver acknowledges a message."""
+    if not PUSH_ENABLED:
+        return
+
+    pn = normalize_plate(plate)
+    if not pn or pn == DEV_PLATE:
+        return
+    if not SUBSCRIPTIONS_BY_PLATE.get(DEV_PLATE):
+        return
+
+    rec = _get_plate_record(pn)
+
+    status_text = "-"
+    dest_text = "-"
+    sched_disp = "-"
+    try:
+        if rec:
+            st = compute_driver_status(rec, lang="en")
+            status_text = str(st.get("status_text", "") or "-")
+            dest_text, _, _ = resolve_destination(rec)
+            sched_disp = _format_scheduled_departure(rec.get("scheduled_departure") or "")
+    except Exception:
+        pass
+
+    msg = f"Driver acknowledged message: {pn}\nStatus: {status_text or '-'}\nDep: {sched_disp or '-'}\nDest: {dest_text or '-'}"
+    bodies = {l: msg for l in SUPPORTED_LANGS}
+    _push_admin_event("ADMIN_MONITOR", bodies, target_plate=pn)
+
+
 def _push_status_change_to_plate(plate: str, movement: Dict[str, Any]) -> None:
     """Push a status update to a plate, in each subscriber's language."""
     try:
@@ -1622,6 +1681,7 @@ async def driver_message(request: Request, secret: str = Query(..., min_length=8
 
     # Save manual message
     MANUAL_STATUS_BY_PLATE[plate] = message
+    MESSAGE_ACK_BY_PLATE.pop(plate, None)
 
     # Force immediate push + update last key
     st = compute_driver_status({"license_plate": plate})
@@ -1633,6 +1693,56 @@ async def driver_message(request: Request, secret: str = Query(..., min_length=8
     _push_driver_message_to_plate(plate, message)
 
     return {"ok": True, "plate": plate, "message": message}
+
+
+@app.post("/api/message_ack")
+def message_ack(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    global LAST_STATUS_KEY_BY_PLATE
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid payload")
+
+    plate = normalize_plate(payload.get("plate") or "")
+    if len(plate) < 2:
+        raise HTTPException(status_code=400, detail="Invalid plate")
+
+    try:
+        lat = float(payload.get("lat"))
+        lon = float(payload.get("lon"))
+        ts = int(payload.get("ts"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Missing or invalid location payload")
+
+    geofence_check(lat, lon, ts)
+
+    had_message = bool(str(MANUAL_STATUS_BY_PLATE.get(plate, "") or "").strip())
+    MANUAL_STATUS_BY_PLATE.pop(plate, None)
+
+    ack_at = datetime.utcnow().isoformat() + "Z"
+    MESSAGE_ACK_BY_PLATE[plate] = {
+        "ack_at": ack_at,
+        "source": "driver_portal",
+    }
+
+    try:
+        rec = _get_plate_record(plate) or {"license_plate": plate}
+        st = compute_driver_status(rec, lang=normalize_lang(payload.get("lang") or "en"))
+        LAST_STATUS_KEY_BY_PLATE[plate] = str(st.get("status_key", "") or "")
+    except Exception:
+        pass
+
+    if had_message:
+        try:
+            _maybe_admin_push_message_acknowledged(plate)
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "plate": plate,
+        "ack_at": ack_at,
+        "had_message": had_message,
+    }
 
 
 @app.get("/api/status")
@@ -1655,11 +1765,16 @@ def get_status(
         except Exception:
             pass
 
+        ack0 = MESSAGE_ACK_BY_PLATE.get(normalize_plate(plate)) or {}
         return {
             "plate": normalize_plate(plate),
             "found": False,
             "house_rules_accepted": normalize_plate(plate) in HOUSE_RULES_ACCEPTED_BY_PLATE,
             "house_rules_required": normalize_plate(plate) not in HOUSE_RULES_ACCEPTED_BY_PLATE,
+            "message_active": False,
+            "got_it_label": got_it_text(lang),
+            "message_acknowledged": bool(ack0),
+            "message_ack_at": str(ack0.get("ack_at", "") or "") if isinstance(ack0, dict) else "",
             "last_refresh": (SNAPSHOT or {}).get("last_update"),
         }
 
@@ -1685,6 +1800,9 @@ def get_status(
     except Exception:
         pass
 
+    manual_msg = str(MANUAL_STATUS_BY_PLATE.get(normalize_plate(plate), "") or "").strip()
+    ack1 = MESSAGE_ACK_BY_PLATE.get(normalize_plate(plate)) or {}
+
     return {
         "plate": normalize_plate(plate),
         "found": True,
@@ -1692,6 +1810,10 @@ def get_status(
         "house_rules_required": normalize_plate(plate) not in HOUSE_RULES_ACCEPTED_BY_PLATE,
         "status_key": st["status_key"],
         "status_text": st["status_text"],
+        "message_active": bool(manual_msg),
+        "got_it_label": got_it_text(lang),
+        "message_acknowledged": bool(ack1),
+        "message_ack_at": str(ack1.get("ack_at", "") or "") if isinstance(ack1, dict) else "",
         "destination_text": dest_text,
         "destination_nav_url": nav,
         "scheduled_departure": sched_disp,
@@ -1737,11 +1859,14 @@ def get_plate_flags(
     for p in plate_list:
         np = normalize_plate(p)
         v = VIEWED_BY_PLATE.get(np) or {}
+        ack = MESSAGE_ACK_BY_PLATE.get(np) or {}
         out[np] = {
             "viewed": bool(v),
             "last_view": v.get("last_view", "") if isinstance(v, dict) else "",
             "count": int(v.get("count", 0)) if isinstance(v, dict) else 0,
             "push_enabled": bool(SUBSCRIPTIONS_BY_PLATE.get(np)),
+            "message_acknowledged": bool(ack),
+            "message_ack_at": str(ack.get("ack_at", "") or "") if isinstance(ack, dict) else "",
         }
 
     return {"ok": True, "plates": out}
@@ -1791,6 +1916,7 @@ def dev_summary(
             except Exception:
                 sched_disp = "-"
 
+        ack = MESSAGE_ACK_BY_PLATE.get(pn) or {}
         items.append({
             "plate": pn,
             "last_check": str(s.get("last_iso", "") or ""),
@@ -1801,6 +1927,8 @@ def dev_summary(
             "status_key": status_key,
             "status_text": status_text,
             "bell": bool(SUBSCRIPTIONS_BY_PLATE.get(pn)),
+            "message_acknowledged": bool(ack),
+            "message_ack_at": str(ack.get("ack_at", "") or "") if isinstance(ack, dict) else "",
         })
 
     # Sort: newest checks first
@@ -1901,6 +2029,7 @@ async def dev_send_message(
         raise HTTPException(status_code=400, detail="This movement has no active push subscribers.")
 
     MANUAL_STATUS_BY_PLATE[plate] = message
+    MESSAGE_ACK_BY_PLATE.pop(plate, None)
 
     st = compute_driver_status({"license_plate": plate})
     try:
@@ -4727,6 +4856,7 @@ textEl.innerHTML = pack.html || "";
       let loc;
       try {
         loc = await getLocation();
+        window.__lastPortalLoc = loc;
       } catch (e) {
         destroyMap();
         show(`<b>${t("err_location")}:</b> ${e.message}<div class="muted">${t("help_location")}</div>`, "err");
@@ -4798,8 +4928,13 @@ textEl.innerHTML = pack.html || "";
           <div><b>${t("place")}:</b> ${placeText}</div>`;
         }
 
+        const gotItBtnHtml = data.message_active
+          ? `<div style="margin-top:14px;"><button id="btnGotIt" class="btn btn-primary" style="width:100%;">${escapeHtml(data.got_it_label || "Got it")}</button></div>`
+          : "";
+
         show(`
           <div class="status-big">"${data.status_text}"</div>
+          ${gotItBtnHtml}
           <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
           <div><b>${t("destination")}:</b> ${destLink}</div>
           <div><b>${t("departure_time")}:</b> ${data.scheduled_departure || "-"}</div>
@@ -4811,6 +4946,40 @@ textEl.innerHTML = pack.html || "";
           <div id="map"></div>
           <div id="mapNote" class="muted" style="margin-top:6px;"></div>
         `, "ok");
+
+        const gotItBtn = document.getElementById("btnGotIt");
+        if (gotItBtn) {
+          gotItBtn.onclick = async () => {
+            const ackLoc = window.__lastPortalLoc;
+            if (!ackLoc || ackLoc.lat == null || ackLoc.lon == null || ackLoc.ts == null) {
+              show(`<b>${t("err_location")}:</b> ${t("help_location")}`, "err");
+              return;
+            }
+            const oldTxt = gotItBtn.textContent || (data.got_it_label || "Got it");
+            gotItBtn.disabled = true;
+            gotItBtn.textContent = "...";
+            try {
+              const ackResp = await fetch(`${API_BASE}/api/message_ack`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  plate,
+                  lat: ackLoc.lat,
+                  lon: ackLoc.lon,
+                  ts: ackLoc.ts,
+                  lang: CURRENT_LANG,
+                }),
+              });
+              const ackData = await readJsonOrText(ackResp);
+              if (!ackResp.ok) throw new Error(ackData.detail || ackResp.statusText);
+              await checkStatus();
+            } catch (e) {
+              gotItBtn.disabled = false;
+              gotItBtn.textContent = oldTxt;
+              show(`<b>${t("err_network")}:</b> ${String(e && e.message ? e.message : e)}`, "err");
+            }
+          };
+        }
 
         setTimeout(() => renderRouteMap(plate, loc), 0);
 
@@ -5027,6 +5196,8 @@ textEl.innerHTML = pack.html || "";
 
     function devRowHtml(it) {
       const bell = it.bell ? "🔔" : "";
+      const ack = it.message_acknowledged ? "🆗" : "";
+      const ackTitle = escapeHtml(it.message_ack_at ? `Acknowledged: ${fmtIso(it.message_ack_at)}` : "");
       const st = escapeHtml(it.status_text || "-");
       const dest = escapeHtml(it.destination_text || "-");
       const dep = escapeHtml(it.scheduled_departure || "-");
@@ -5049,6 +5220,7 @@ textEl.innerHTML = pack.html || "";
         <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10);">${dest}</td>
         <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10);">${st}</td>
         <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10); text-align:center;">${bell}</td>
+        <td title="${ackTitle}" style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10); text-align:center;">${ack}</td>
         <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10); text-align:right; white-space:nowrap;">
           <button
             class="btn btn-secondary"
@@ -5080,7 +5252,7 @@ textEl.innerHTML = pack.html || "";
         adminHint = `<div class="muted" style="margin-top:6px;">Admin subscribed: ✅</div>`;
       }
 
-      const rows = items.length ? items.map(devRowHtml).join("") : `<tr><td colspan="8" class="muted" style="padding:10px;">No checks in the last 12 hours.</td></tr>`;
+      const rows = items.length ? items.map(devRowHtml).join("") : `<tr><td colspan="9" class="muted" style="padding:10px;">No checks in the last 12 hours.</td></tr>`;
 
       show(`
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
@@ -5110,6 +5282,7 @@ textEl.innerHTML = pack.html || "";
                 <th style="text-align:left; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">Destination</th>
                 <th style="text-align:left; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">Status</th>
                 <th style="text-align:center; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">🔔</th>
+                <th style="text-align:center; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">🆗</th>
                 <th style="text-align:right; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">Message</th>
               </tr>
             </thead>
