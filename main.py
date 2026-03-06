@@ -1872,6 +1872,52 @@ def dev_subscribe_admin(
     return {"ok": True, "plate": DEV_PLATE, "count": len(subs)}
 
 
+@app.post("/api/dev/send_message")
+async def dev_send_message(
+    request: Request,
+    key: str = Query(..., min_length=3, description="Developer key (DEV_PLATE)"),
+) -> Dict[str, Any]:
+    if normalize_plate(key) != DEV_PLATE:
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid JSON body.")
+
+    plate = normalize_plate(str(body.get("plate", "")))
+    message = str(body.get("message", "") or "").strip()
+
+    if not plate:
+        raise HTTPException(status_code=400, detail="Missing 'plate'.")
+    if not message:
+        raise HTTPException(status_code=400, detail="Missing 'message'.")
+    if len(message) > 500:
+        raise HTTPException(status_code=400, detail="Message too long (max 500 characters).")
+    if not SUBSCRIPTIONS_BY_PLATE.get(plate):
+        raise HTTPException(status_code=400, detail="This movement has no active push subscribers.")
+
+    MANUAL_STATUS_BY_PLATE[plate] = message
+
+    st = compute_driver_status({"license_plate": plate})
+    try:
+        LAST_STATUS_KEY_BY_PLATE[plate] = st["status_key"]
+    except Exception:
+        pass
+
+    _push_driver_message_to_plate(plate, message)
+
+    return {
+        "ok": True,
+        "plate": plate,
+        "message": message,
+        "subscriber_count": len(SUBSCRIPTIONS_BY_PLATE.get(plate) or []),
+    }
+
+
 
 
 @app.get("/api/traffic_delay")
@@ -4958,16 +5004,42 @@ textEl.innerHTML = pack.html || "";
       return data;
     }
 
+    function escapeHtml(v) {
+      return String(v == null ? "" : v)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    async function sendAdminPlateMessage(plate, message) {
+      const resp = await fetch(`${API_BASE}/api/dev/send_message?key=${encodeURIComponent(DEV_PLATE)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plate, message }),
+      });
+
+      const data = await readJsonOrText(resp);
+      if (!resp.ok) throw new Error(data.detail || resp.statusText);
+      return data;
+    }
+
     function devRowHtml(it) {
       const bell = it.bell ? "🔔" : "";
-      const st = (it.status_text || "-");
-      const dest = (it.destination_text || "-");
-      const dep = (it.scheduled_departure || "-");
+      const st = escapeHtml(it.status_text || "-");
+      const dest = escapeHtml(it.destination_text || "-");
+      const dep = escapeHtml(it.scheduled_departure || "-");
       const lc = fmtIso(it.last_check || "");
       const cnt = (it.count_12h != null) ? String(it.count_12h) : "-";
-      const plate = (it.plate || "-");
+      const plate = escapeHtml(it.plate || "-");
 
       const missing = it.movement_found ? "" : ' <span class="muted">(not found)</span>';
+      const canSend = !!it.bell;
+      const msgBtnLabel = canSend ? "Message" : "No push user";
+      const msgBtnDisabled = canSend ? "" : " disabled";
+      const msgBtnOpacity = canSend ? "1" : "0.55";
+      const msgBtnCursor = canSend ? "pointer" : "not-allowed";
 
       return `<tr>
         <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10); white-space:nowrap;"><b>${plate}</b>${missing}</td>
@@ -4977,6 +5049,15 @@ textEl.innerHTML = pack.html || "";
         <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10);">${dest}</td>
         <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10);">${st}</td>
         <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10); text-align:center;">${bell}</td>
+        <td style="padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.10); text-align:right; white-space:nowrap;">
+          <button
+            class="btn btn-secondary"
+            data-dev-send="1"
+            data-plate="${plate}"
+            style="min-width:110px; opacity:${msgBtnOpacity}; cursor:${msgBtnCursor};"
+            ${msgBtnDisabled}
+          >${msgBtnLabel}</button>
+        </td>
       </tr>`;
     }
 
@@ -4999,7 +5080,7 @@ textEl.innerHTML = pack.html || "";
         adminHint = `<div class="muted" style="margin-top:6px;">Admin subscribed: ✅</div>`;
       }
 
-      const rows = items.length ? items.map(devRowHtml).join("") : `<tr><td colspan="7" class="muted" style="padding:10px;">No checks in the last 12 hours.</td></tr>`;
+      const rows = items.length ? items.map(devRowHtml).join("") : `<tr><td colspan="8" class="muted" style="padding:10px;">No checks in the last 12 hours.</td></tr>`;
 
       show(`
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
@@ -5029,6 +5110,7 @@ textEl.innerHTML = pack.html || "";
                 <th style="text-align:left; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">Destination</th>
                 <th style="text-align:left; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">Status</th>
                 <th style="text-align:center; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">🔔</th>
+                <th style="text-align:right; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.18);">Message</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -5077,6 +5159,44 @@ textEl.innerHTML = pack.html || "";
           }
         };
       }
+
+      const devMsg = document.getElementById("devMsg");
+      const setDevMsg = (txt, isErr) => {
+        if (!devMsg) return;
+        devMsg.style.display = txt ? "block" : "none";
+        devMsg.textContent = txt || "";
+        devMsg.style.color = isErr ? "#a00000" : "";
+      };
+
+      document.querySelectorAll("button[data-dev-send='1']").forEach((btn) => {
+        btn.onclick = async () => {
+          const plate = String(btn.getAttribute("data-plate") || "").trim();
+          if (!plate) return;
+
+          const msg = window.prompt(`Send message to ${plate}:`, "");
+          if (msg == null) return;
+
+          const cleanMsg = String(msg || "").trim();
+          if (!cleanMsg) {
+            setDevMsg("Message is empty.", true);
+            return;
+          }
+
+          const oldLabel = btn.textContent || "Message";
+          btn.disabled = true;
+          btn.textContent = "Sending…";
+
+          try {
+            await sendAdminPlateMessage(plate, cleanMsg);
+            setDevMsg(`Message sent to ${plate}.`, false);
+            await refreshDeveloperView();
+          } catch (e) {
+            setDevMsg(String(e && e.message ? e.message : e), true);
+            btn.disabled = false;
+            btn.textContent = oldLabel;
+          }
+        };
+      });
     }
 
     async function refreshDeveloperView() {
