@@ -331,6 +331,13 @@ def _clean_location_value(v: Any) -> str:
         return ""
     if s.lower() == "wait":
         return ""
+
+    m = re.match(r"(?i)^P\s*-\s*P(.*)$", s)
+    if m:
+        rest = re.sub(r"^[\s\-/:]+", "", str(m.group(1) or ""))
+        if (not rest) or re.match(r"^\d", rest):
+            return f"P{rest}" if rest else "P"
+
     return s
 
 
