@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FedEx Duiven-QAR Yard House Rules</title>
+<style>
+:root {
+  --fx-purple:#2f014f;
+  --fx-purple-2:#4d148c;
+  --fx-orange:#ff6600;
+  --panel:#3b0c63;
+  --panel-2:#4d148c;
+  --text:#ffffff;
+  --muted:#eadbff;
+  --line:rgba(255,255,255,.22);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;
+  background:var(--fx-purple);
+  color:var(--text);
+  font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+a{color:inherit}
+.splash{
+  position:fixed;
+  inset:0;
+  z-index:999;
+  display:grid;
+  place-items:center;
+  overflow:hidden;
+  background:linear-gradient(135deg,#24003d 0%, #4d148c 62%, #ff6600 140%);
+  color:#fff;
+  opacity:1;
+  visibility:visible;
+  transition:opacity .45s ease, visibility .45s ease;
+}
+
+.splash.hide{
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+}
+
+.splash-inner{
+  position:relative;
+  z-index:2;
+  text-align:center;
+  padding:20px;
+  transition:transform .95s cubic-bezier(.2,.7,.15,1), opacity .45s ease;
+  will-change:transform, opacity;
+}
+
+.splash.phase-zoom .splash-inner{
+  transform:scale(2.35) translateX(7%);
+  opacity:0;
+}
+
+.brand{
+  font-weight:900;
+  font-size:clamp(3rem,14vw,5.4rem);
+  letter-spacing:-.08em;
+  line-height:1;
+}
+
+.brand .fed{color:#fff}
+.brand .ex{color:var(--fx-orange)}
+
+.arrow{
+  display:inline-block;
+  width:0;
+  height:0;
+  border-left:.62em solid currentColor;
+  border-top:.34em solid transparent;
+  border-bottom:.34em solid transparent;
+  margin:0 -.05em 0 -.13em;
+}
+
+.brand .arrow{color:#fff}
+.brand-image{display:flex; justify-content:center}
+
+.splash-logo-img{
+  display:block;
+  width:min(72vw,520px);
+  height:auto;
+}
+
+.logo-img{
+  display:block;
+  width:154px;
+  height:auto;
+  flex:0 0 auto;
+}
+
+.splash-tag{
+  margin-top:16px;
+  font-size:clamp(1rem,4vw,1.2rem);
+  opacity:.92;
+  letter-spacing:.05em;
+  transition:opacity .35s ease;
+}
+
+.splash.phase-zoom .splash-tag{
+  opacity:0;
+}
+
+.app{
+  opacity:1;
+  transform:none;
+}
+
+.app.ready{
+  opacity:1;
+}
+
+/*
+  The reveal overlay sits on top of the splash.  Use a high z-index so that
+  the arrow image is rendered above the splash content during the animation.
+*/
+#revealOverlay{
+  position:fixed;
+  inset:0;
+  z-index:1001;
+  pointer-events:none;
+  opacity:1;
+}
+
+/*
+  Styling for the reveal arrow image.  The arrow is an SVG file loaded as an
+  <img> so that it can be transformed using CSS.  The will-change hint
+  improves animation performance.
+*/
+/*
+  The reveal arrow starts off invisible so that it doesn’t flash in its natural size
+  before the animation.  We set transform‑origin to the top left so pixel
+  translations applied by the JavaScript correspond to the arrow’s top‑left
+  corner.  The will‑change hint improves animation performance.
+*/
+#revealArrow{
+  display:block;
+  opacity:0;
+  transform-origin:0 0;
+  will-change: transform, opacity;
+}
+
+#revealSvg{
+  display:block;
+  width:100%;
+  height:100%;
+  overflow:visible;
+}
+
+#debugArrow{
+  will-change:transform, opacity;
+}.shell{max-width:720px; margin:0 auto; padding:0 12px 30px}
+.topbar{
+  position:sticky; top:0; z-index:30;
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:12px 0; margin-bottom:14px;
+  background:rgba(47,1,79,.96);
+  border-bottom:2px solid var(--fx-orange);
+}
+.topleft{display:flex; align-items:center; gap:12px; min-width:0}
+.logo{font-size:2.2rem; font-weight:900; letter-spacing:-.08em; line-height:1; flex:0 0 auto}
+.logo .fed{color:#fff}
+.logo .ex{color:var(--fx-orange)}
+.logo .arrow{color:#fff; border-left-width:.45em; border-top-width:.22em; border-bottom-width:.22em}
+.toptext strong{display:block; font-size:1rem; letter-spacing:-.02em; color:#fff}
+.toptext small{display:block; color:var(--muted); font-weight:700}
+.lang-box select{
+  border:2px solid var(--line);
+  background:var(--panel);
+  color:#fff;
+  font-weight:800;
+  padding:10px 12px;
+  min-width:132px;
+  outline:none;
+}
+.hero{
+  background:var(--panel-2);
+  border:2px solid var(--line);
+  padding:18px;
+  margin-bottom:14px;
+}
+.eyebrow{display:inline-block; padding:6px 10px; background:var(--fx-orange); color:#fff; font-weight:900; letter-spacing:.04em; text-transform:uppercase; font-size:.76rem; margin-bottom:10px}
+.hero h1{margin:0; font-size:2rem; line-height:1.02; letter-spacing:-.04em; color:#fff}
+.hero p{margin:10px 0 0; color:var(--muted); line-height:1.58}
+.tap-hint{margin-top:12px; display:inline-block; padding:8px 10px; border:2px solid rgba(255,255,255,.16); color:#fff; font-weight:800; font-size:.84rem}
+.sections{display:grid; gap:14px}
+.section-card{background:var(--panel); border:2px solid var(--line); padding:16px}
+.section-head{display:flex; align-items:center; gap:10px; margin-bottom:12px}
+.section-icon{width:40px; height:40px; display:grid; place-items:center; color:#fff; font-weight:900; flex:0 0 auto}
+.section-icon.purple{background:var(--fx-purple-2)}
+.section-icon.orange{background:var(--fx-orange)}
+.section-title{margin:0; font-size:1.12rem; line-height:1.2; letter-spacing:-.02em; color:#fff}
+.section-body p{margin:0 0 12px; color:var(--muted); line-height:1.58}
+.bullet-list{display:grid; gap:12px}
+.bullet-item{display:grid; gap:10px}
+.bullet-text{line-height:1.58; color:#fff}
+.bullet-text::before{content:"-"; color:var(--fx-orange); font-weight:900; margin-right:10px}
+.inline-call-link{display:inline-block; text-decoration:none; vertical-align:text-bottom; line-height:1}
+.inline-call-picto{display:inline-block; width:auto; height:4.6em; max-width:none; margin:0 .16em; vertical-align:text-bottom; line-height:1; cursor:pointer}
+.eyebrow,#heroText,.tap-hint{display:none !important}
+.section-media{margin:0; border-top:2px solid var(--fx-orange); padding-top:10px}
+.section-media img{display:block; width:100%; height:auto; border:2px solid rgba(255,255,255,.12)}
+.footer{text-align:center; padding:22px 0 8px; color:#fff; font-weight:900; font-size:1.5rem; letter-spacing:-.03em}
+.footer small{display:block; margin-top:8px; color:var(--muted); font-size:.9rem; font-weight:700}
+@media (max-width:520px){
+  .hero h1{font-size:1.72rem}
+  .logo-img{width:126px}
+  .toptext strong{font-size:.92rem}
+  .toptext small{font-size:.8rem}
+  .lang-box select{min-width:116px; padding:9px 10px; font-size:.92rem}
+}
+@media (prefers-reduced-motion: reduce){
+  /*
+    Respect the user’s reduced motion preference by disabling smooth scroll
+    behaviour on the page.  We intentionally do not disable all transitions
+    globally because doing so would also suppress the reveal animation.  If
+    reduced motion is enabled the JavaScript sets the splash to hidden
+    immediately (see the script below).
+  */
+  html{scroll-behavior:auto}
+}
+
+body.embedded{
+  background:var(--fx-purple);
+}
+body.embedded .splash,
+body.embedded #revealOverlay{
+  display:none !important;
+}
+body.embedded .shell{
+  max-width:none;
+  padding:0 12px 24px;
+}
+
+</style>
+</head>
+<body>
+<div id="splash" class="splash" aria-hidden="true">
+  <div class="splash-inner">
+    <div class="brand brand-image">
+      <img
+        src="img/FedEx_Express-Logo.wine.svg"
+        alt="FedEx Express"
+        class="splash-logo-img"
+        id="fedexLogoSplash"
+      />
+    </div>
+    <div class="splash-tag">Duiven-QAR Yard House Rules</div>
+  </div>
+</div>
+
+<!--
+  The reveal overlay contains the animated arrow.  In the original file the arrow
+  was defined as an inline <polygon> inside an <svg> and hidden off‑screen.
+  That approach made it difficult to position the arrow precisely relative to
+  the FedEx logo and produced inconsistent results when scaling and
+  translating the shape.  Here the arrow is instead rendered as an <img>
+  element.  Because it’s a normal DOM element we can apply CSS transforms
+  using pixel units, which makes it straightforward to compute the start
+  position, scale and final position in the reveal animation.
+-->
+<div id="revealOverlay" aria-hidden="true">
+  <img id="revealArrow" src="img/fedex-arrow-mask.svg" alt="Reveal arrow" style="position:absolute; left:0; top:0;" />
+</div>
+
+<div id="app" class="app">  <div class="shell">
+    <div class="topbar">
+      <div class="topleft">
+        <img src="img/FedEx_Express-Logo.wine.svg" alt="FedEx Express" class="logo-img" />
+        <div class="toptext">
+          <strong id="miniTitle"></strong>
+          <small id="miniSubtitle"></small>
+        </div>
+      </div>
+      <div class="lang-box">
+        <label for="langSelect" id="langLabel" style="display:none">Language</label>
+        <select id="langSelect"></select>
+      </div>
+    </div>
+
+    <section class="hero">
+      <div class="eyebrow">Mobile first</div>
+      <h1 id="heroTitle"></h1>
+      <p id="heroText"></p>
+      <div class="tap-hint" id="tapHint"></div>
+    </section>
+
+
+    <section class="sections" id="sections"></section>
+
+    <div class="footer" id="footerText"></div>
+  </div>
+</div>
+
+<script>
+const content = {"en": {"languageName": "English","ui": {"language": "Language","title": "Duiven-QAR Yard House Rules","subtitle": "Safety First","intro": "Mobile-friendly house rules for drivers. Tap the pictograms to call immediately.","tapHint": "Tap a pictogram to call directly.","footer": "Think Safety. Act Safely. Be Safe."},"sections": [{"title": "Introduction","text": "These rules apply to all drivers, including subcontracted drivers, at the Duiven-QAR FedEx Express location.","bullets": ["The goal is to ensure safety, maintain order, and support proper site operations.","Always follow local rules and the instructions of security personel and shunters."]},{"title": "Site safety rules","bullets": ["The speed limit on site is 15 km/h.","There is one-way traffic when entering via the security gate. Drive forward and do not turn left immediately.","Walk only on designated pedestrian paths.","Do not access the warehouse without authorization.","Drugs and public intoxication are strictly prohibited on site."]},{"title": "Personal protective measures","bullets": ["Wear a closed high-visibility safety vest.","Wear class S3 safety shoes on the yard.","Use appropriate safety equipment when docking or handling trailers.","Flip-flops, slippers, and open footwear are not allowed on site."]},{"title": "Badge procedure – gatehouse access","bullets": ["Collect a badge at the security desk in the downstairs gatehouse.","The badge gives access to the gatehouse and the canteen during opening hours.","Return the badge when leaving the gatehouse.","Unreturned badges will be blocked."]},{"title": "Parking instructions","bullets": ["Park within the designated parking boxes.","Check for personal vehicles nearby before maneuvering.","Proper parking improves safety and helps prevent damage.","Keep parking and operational areas clean and orderly."]},{"title": "Keep the commun places clean and comfortable","bullets": ["Leave tables, chairs, and shared areas clean after use.","Use the garbage bins for all waste.","Slide chairs back and return them to their place.","Keep the toilets clean."]},{"title": "Help us keep the yard clean","bullets": ["Use the waste containers for all waste.","Do not leave bottles, cans, broken glass, cardboard, paper towels, cigarette butts, or dirty dishes on the ground.","Cooking or frying is allowed only in the designated area.","Gas stoves or gas bottles between trucks are strictly forbidden.","Washing entire vehicles on site is not permitted."]},{"title": "What to do in case of emergency","bullets": ["Stay calm.","In emergencies, always call 112 first.","Inform the security team at 0316 799476 and report the location, circumstances, and number of injured people.","In case of fire, leave via the nearest emergency exit and follow staff to the assembly point."]},{"title": "Smoking","bullets": ["Smoking is only allowed in designated areas."]}]},"de": {"languageName": "Deutsch","ui": {"language": "Sprache","title": "Duiven-QAR Hofordnung","subtitle": "Sicherheit zuerst","intro": "Mobil optimierte Hofregeln für Fahrer. Tippen Sie auf die Piktogramme, um sofort anzurufen.","tapHint": "Piktogramm antippen, um direkt anzurufen.","footer": "Sicherheit denken. Sicher handeln. Sicher bleiben."},"sections": [{"title": "Einführung","text": "Diese Regeln gelten für alle Fahrer, einschließlich Subunternehmer, am FedEx-Express-Standort Duiven-QAR.","bullets": ["Ziel sind Sicherheit, Ordnung und ein reibungsloser Betrieb.","Befolgen Sie immer die lokalen Regeln sowie die Anweisungen von Sicherheitsdienst und Rangierfahrern."]},{"title": "Sicherheitsregeln auf dem Gelände","bullets": ["Auf dem Gelände gilt eine Höchstgeschwindigkeit von 15 km/h.","Beim Einfahren durch das Sicherheitstor gilt Einbahnverkehr. Geradeaus fahren und nicht sofort links abbiegen.","Gehen Sie nur auf den ausgewiesenen Fußwegen.","Betreten Sie das Lager nicht ohne Genehmigung.","Drogen und öffentliche Trunkenheit sind streng verboten."]},{"title": "Persönliche Schutzausrüstung","bullets": ["Tragen Sie eine geschlossene Warnweste.","Tragen Sie Sicherheitsschuhe Klasse S3 auf dem Hof.","Verwenden Sie geeignete Schutzausrüstung beim Andocken oder Bewegen von Aufliegern.","Flip-Flops, Hausschuhe und offenes Schuhwerk sind nicht erlaubt."]},{"title": "Ausweisverfahren – Gatehouse-Zugang","bullets": ["Holen Sie am Sicherheitsschalter im unteren Gatehouse einen Ausweis ab.","Der Ausweis ermöglicht Zugang zum Gatehouse und während der Öffnungszeiten zur Kantine.","Geben Sie den Ausweis beim Verlassen des Gatehouse zurück.","Nicht zurückgegebene Ausweise werden gesperrt."]},{"title": "Parkhinweise","bullets": ["Parken Sie innerhalb der markierten Parkflächen.","Prüfen Sie vor dem Rangieren, ob private Fahrzeuge in der Nähe stehen.","Richtiges Parken erhöht die Sicherheit und verhindert Schäden.","Halten Sie Park- und Betriebsflächen sauber und ordentlich."]},{"title": "Halten Sie die Gemeinschaftsbereiche sauber und ordentlich","bullets": ["Hinterlassen Sie Tische, Stühle und Gemeinschaftsbereiche sauber.","Benutzen Sie die Mülleimer für alle Abfälle.","Schieben Sie Stühle zurück und stellen Sie sie an ihren Platz.","Halten Sie die Toiletten sauber."]},{"title": "Helfen Sie mit, den Hof sauber zu halten","bullets": ["Benutzen Sie die Abfallcontainer.","Lassen Sie keine Flaschen, Dosen, Glasscherben, Kartons, Papierhandtücher, Zigarettenstummel oder schmutziges Geschirr auf dem Boden liegen.","Kochen oder Braten ist nur im vorgesehenen Bereich erlaubt.","Gaskocher oder Gasflaschen zwischen Lkw sind streng verboten.","Das Waschen kompletter Fahrzeuge auf dem Gelände ist nicht erlaubt."]},{"title": "Verhalten im Notfall","bullets": ["Ruhe bewahren.","Im Notfall immer zuerst 112 anrufen.","Informieren Sie anschließend den Sicherheitsdienst unter 0316 799476 und melden Sie Ort, Umstände und Anzahl der Verletzten.","Im Brandfall verlassen Sie das Gebäude über den nächsten Notausgang und folgen dem Personal zum Sammelpunkt."]},{"title": "Rauchen","bullets": ["Rauchen ist nur in den ausgewiesenen Bereichen erlaubt."]}]},"nl": {"languageName": "Nederlands","ui": {"language": "Taal","title": "Huisregels voor het terrein Duiven-QAR","subtitle": "Veiligheid eerst","intro": "Mobiel geoptimaliseerde huisregels voor chauffeurs. Tik op de pictogrammen om direct te bellen.","tapHint": "Tik op een pictogram om direct te bellen.","footer": "Denk veilig. Handel veilig. Blijf veilig."},"sections": [{"title": "Introductie","text": "Deze regels gelden voor alle chauffeurs, inclusief onderaannemers, op de FedEx Express-locatie Duiven-QAR.","bullets": ["Het doel is veiligheid, orde en een goede werking van de site.","Volg altijd de lokale regels en de instructies van beveiliging en rangeerders."]},{"title": "Veiligheidsregels op de site","bullets": ["De maximumsnelheid op het terrein is 15 km/u.","Bij binnenkomst via de security gate geldt eenrichtingsverkeer. Rij rechtdoor en sla niet direct linksaf.","Loop alleen op de aangegeven voetpaden.","Betreed het warehouse niet zonder toestemming.","Drugs en openbare dronkenschap zijn strikt verboden op de site."]},{"title": "Persoonlijke beschermingsmaatregelen","bullets": ["Draag een gesloten veiligheidsvest met hoge zichtbaarheid.","Draag veiligheidsschoenen klasse S3 op het terrein.","Gebruik geschikte veiligheidsmiddelen bij het docken of verplaatsen van trailers.","Slippers, pantoffels en open schoenen zijn niet toegestaan."]},{"title": "Badgeprocedure – toegang gatehouse","bullets": ["Haal een badge op bij de securitybalie in het beneden-gatehouse.","De badge geeft toegang tot het gatehouse en tijdens openingstijden tot de kantine.","Lever de badge in wanneer u het gatehouse verlaat.","Niet-ingeleverde badges worden geblokkeerd."]},{"title": "Parkeerinstructies","bullets": ["Parkeer binnen de aangegeven parkeervakken.","Controleer voor het manoeuvreren of er personenauto’s in de buurt staan.","Correct parkeren verhoogt de veiligheid en voorkomt schade.","Houd parkeer- en werkgebieden schoon en ordelijk."]},{"title": "Houd de gemeenschappelijke ruimtes schoon en comfortabel","bullets": ["Laat tafels, stoelen en gedeelde ruimtes schoon achter.","Gebruik de afvalbakken voor al het afval.","Zet stoelen terug op hun plaats.","Houd de toiletten schoon."]},{"title": "Help het terrein schoon te houden","bullets": ["Gebruik de afvalcontainers voor vuilnis.","Laat geen flessen, blikjes, glasscherven, karton, papieren handdoeken, sigarettenpeuken of vuile vaat op de grond liggen.","Koken of bakken is alleen toegestaan op de aangewezen plaats.","Gasstellen of gasflessen tussen trucks zijn strikt verboden.","Het volledig wassen van voertuigen op het terrein is niet toegestaan."]},{"title": "Wat te doen in geval van nood","bullets": ["Blijf kalm.","Bel bij nood altijd eerst 112.","Informeer daarna de beveiliging via 0316 799476 en meld locatie, omstandigheden en aantal gewonden.","Verlaat bij brand het gebouw via de dichtstbijzijnde nooduitgang en volg het personeel naar het verzamelpunt."]},{"title": "Roken","bullets": ["Roken is alleen toegestaan in de daarvoor aangewezen zones."]}]},"pl": {"languageName": "Polski","ui": {"language": "Język","title": "Regulamin placu Duiven-QAR","subtitle": "Bezpieczeństwo przede wszystkim","intro": "Regulamin zoptymalizowany pod telefon. Dotknij piktogramów, aby od razu zadzwonić.","tapHint": "Dotknij piktogramu, aby zadzwonić bezpośrednio.","footer": "Myśl bezpiecznie. Działaj bezpiecznie. Bądź bezpieczny."},"sections": [{"title": "Wprowadzenie","text": "Te zasady obowiązują wszystkich kierowców, także podwykonawców, na terenie FedEx Express Duiven-QAR.","bullets": ["Celem jest bezpieczeństwo, porządek i prawidłowe funkcjonowanie obiektu.","Zawsze stosuj się do lokalnych zasad oraz poleceń ochrony i shunterów."]},{"title": "Zasady bezpieczeństwa na terenie","bullets": ["Na terenie obowiązuje ograniczenie prędkości do 15 km/h.","Przy wjeździe przez bramę ochrony obowiązuje ruch jednokierunkowy. Jedź prosto i nie skręcaj od razu w lewo.","Poruszaj się wyłącznie wyznaczonymi ciągami pieszymi.","Nie wchodź do magazynu bez zezwolenia.","Narkotyki i publiczne odurzenie są surowo zabronione."]},{"title": "Środki ochrony osobistej","bullets": ["Noś zamkniętą kamizelkę ostrzegawczą o wysokiej widoczności.","Na placu noś obuwie ochronne klasy S3.","Używaj odpowiedniego sprzętu ochronnego podczas dokowania lub obsługi naczep.","Klapki, pantofle i otwarte obuwie są zabronione."]},{"title": "Procedura przepustki – dostęp do gatehouse","bullets": ["Odbierz przepustkę w punkcie ochrony w dolnym gatehouse.","Przepustka daje dostęp do gatehouse oraz do kantyny w godzinach otwarcia.","Oddaj przepustkę przy opuszczaniu gatehouse.","Nieoddane przepustki zostaną zablokowane."]},{"title": "Instrukcje parkowania","bullets": ["Parkuj wyłącznie w wyznaczonych polach parkingowych.","Przed manewrowaniem sprawdź, czy w pobliżu nie stoją samochody osobowe.","Prawidłowe parkowanie zwiększa bezpieczeństwo i zapobiega uszkodzeniom.","Utrzymuj parkingi i strefy operacyjne w czystości i porządku."]},{"title": "Utrzymuj wspólne pomieszczenia w czystości i porządku","bullets": ["Po użyciu zostaw stoły, krzesła i wspólne przestrzenie czyste.","Wyrzucaj wszystkie odpady do koszy.","Odstaw krzesła na miejsce po użyciu.","Utrzymuj toalety w czystości."]},{"title": "Pomóż utrzymać plac w czystości","bullets": ["Wyrzucaj śmieci do kontenerów.","Nie zostawiaj na ziemi butelek, puszek, szkła, kartonu, ręczników papierowych, niedopałków ani brudnych naczyń.","Gotowanie lub smażenie jest dozwolone tylko w wyznaczonym miejscu.","Kuchenki gazowe i butle gazowe między ciężarówkami są surowo zabronione.","Mycie całych pojazdów na terenie jest zabronione."]},{"title": "Co robić w nagłym wypadku","bullets": ["Zachowaj spokój.","W nagłym wypadku zawsze najpierw dzwoń pod 112.","Następnie poinformuj ochronę pod numerem 0316 799476 i podaj miejsce, okoliczności oraz liczbę poszkodowanych.","W razie pożaru opuść budynek najbliższym wyjściem ewakuacyjnym i podążaj za personelem do punktu zbiórki."]},{"title": "Palenie","bullets": ["Palenie jest dozwolone wyłącznie w wyznaczonych miejscach."]}]},"hu": {"languageName": "Magyar","ui": {"language": "Nyelv","title": "Duiven-QAR udvari házirend","subtitle": "A biztonság az első","intro": "Mobilra optimalizált házirend járművezetőknek. Érintse meg a piktogramokat a közvetlen híváshoz.","tapHint": "Érintse meg a piktogramot a közvetlen híváshoz.","footer": "Gondolkodj biztonságosan. Cselekedj biztonságosan. Maradj biztonságban."},"sections": [{"title": "Bevezetés","text": "Ezek a szabályok minden járművezetőre, beleértve az alvállalkozókat is, érvényesek a Duiven-QAR FedEx Express telephelyen.","bullets": ["A cél a biztonság, a rend és a megfelelő működés.","Mindig kövesse a helyi szabályokat, valamint a biztonsági szolgálat és a shunterek utasításait."]},{"title": "Telephelyi biztonsági szabályok","bullets": ["A megengedett sebesség a telephelyen 15 km/h.","A biztonsági kapun belépve egyirányú forgalom van. Haladjon előre, és ne forduljon rögtön balra.","Csak a kijelölt gyalogos útvonalakat használja.","Engedély nélkül ne menjen be a raktárba.","A kábítószer-használat és a nyilvános részegség szigorúan tilos."]},{"title": "Egyéni védőfelszerelés","bullets": ["Viseljen zárt, jól látható biztonsági mellényt.","Az udvaron S3-as biztonsági cipő viselése kötelező.","Pótkocsik csatlakoztatásakor vagy kezelésénél használjon megfelelő védőfelszerelést.","Papucs, szandál és nyitott lábbeli használata tilos."]},{"title": "Belépőkártya-eljárás – gatehouse hozzáférés","bullets": ["Vegyen fel kártyát a földszinti gatehouse biztonsági pultjánál.","A kártya hozzáférést ad a gatehouse-hoz és nyitvatartási időben a kantinhoz.","A gatehouse elhagyásakor a kártyát vissza kell adni.","A vissza nem adott kártyák letiltásra kerülnek."]},{"title": "Parkolási szabályok","bullets": ["Csak a kijelölt parkolóhelyeken parkoljon.","Manőverezés előtt ellenőrizze, hogy nincs-e személyautó a közelben.","A szabályos parkolás növeli a biztonságot és megelőzi a károkat.","Tartsa tisztán és rendezetten a parkoló- és üzemi területeket."]},{"title": "Tartsa tisztán és rendezetten a közös helyiségeket","bullets": ["Használat után hagyja tisztán az asztalokat, székeket és közös tereket.","Minden hulladékot a szemetesbe dobjon.","A székeket használat után tegye vissza a helyükre.","Tartsa tisztán a mellékhelyiségeket."]},{"title": "Segítsen tisztán tartani az udvart","bullets": ["A hulladékot a konténerekbe helyezze.","Ne hagyjon a földön palackot, dobozt, üveget, kartont, papírtörlőt, cigarettacsikket vagy koszos edényt.","Főzni vagy sütni csak a kijelölt helyen szabad.","Teherautók között gázfőző vagy gázpalack használata szigorúan tilos.","A járművek teljes mosása nem engedélyezett."]},{"title": "Teendők vészhelyzet esetén","bullets": ["Maradjon nyugodt.","Vészhelyzetben mindig először a 112-t hívja.","Ezután értesítse a biztonsági szolgálatot a 0316 799476 számon, és adja meg a helyszínt, a körülményeket és a sérültek számát.","Tűz esetén a legközelebbi vészkijáraton hagyja el az épületet, és kövesse a személyzetet a gyülekezési pontra."]},{"title": "Dohányzás","bullets": ["Dohányozni csak a kijelölt területeken szabad."]}]},"fr": {"languageName": "Français","ui": {"language": "Langue","title": "Règlement du site Duiven-QAR","subtitle": "La sécurité avant tout","intro": "Règlement optimisé pour mobile. Touchez les pictogrammes pour appeler immédiatement.","tapHint": "Touchez un pictogramme pour appeler directement.","footer": "Pensez sécurité. Agissez en sécurité. Restez en sécurité."},"sections": [{"title": "Introduction","text": "Ces règles s’appliquent à tous les conducteurs, y compris les sous-traitants, sur le site FedEx Express de Duiven-QAR.","bullets": ["L’objectif est la sécurité, l’ordre et le bon fonctionnement du site.","Respectez toujours les règles locales ainsi que les instructions de la sécurité et des shunters."]},{"title": "Règles de sécurité sur le site","bullets": ["La vitesse maximale sur site est de 15 km/h.","À l’entrée par la porte de sécurité, la circulation est à sens unique. Avancez tout droit et ne tournez pas immédiatement à gauche.","Marchez uniquement sur les cheminements piétons désignés.","N’accédez pas à l’entrepôt sans autorisation.","Les drogues et l’ivresse publique sont strictement interdites sur le site."]},{"title": "Mesures de protection individuelle","bullets": ["Portez un gilet de sécurité haute visibilité fermé.","Portez des chaussures de sécurité de classe S3 dans la cour.","Utilisez l’équipement de sécurité approprié lors de l’accostage ou de la manipulation des remorques.","Les tongs, chaussons et chaussures ouvertes sont interdits."]},{"title": "Procédure de badge – accès gatehouse","bullets": ["Retirez un badge au bureau de sécurité du gatehouse inférieur.","Le badge donne accès au gatehouse et à la cantine pendant les heures d’ouverture.","Rendez le badge en quittant le gatehouse.","Les badges non rendus seront bloqués."]},{"title": "Consignes de stationnement","bullets": ["Garez-vous dans les emplacements prévus.","Vérifiez la présence éventuelle de véhicules particuliers à proximité avant toute manœuvre.","Un stationnement correct améliore la sécurité et évite les dommages.","Gardez les zones de stationnement et d’exploitation propres et ordonnées."]},{"title": "Gardez les espaces communs propres et confortables","bullets": ["Laissez les tables, les chaises et les espaces partagés propres après usage.","Utilisez les poubelles pour tous les déchets.","Replacez les chaises après utilisation.","Gardez les toilettes propres."]},{"title": "Aidez-nous à garder la cour propre","bullets": ["Utilisez les conteneurs à déchets.","Ne laissez pas de bouteilles, canettes, verre cassé, carton, essuie-tout, mégots ou vaisselle sale sur le sol.","La cuisson ou la friture n’est autorisée que dans la zone désignée.","Les réchauds à gaz et bouteilles de gaz entre les camions sont strictement interdits.","Le lavage complet des véhicules sur site est interdit."]},{"title": "Que faire en cas d’urgence","bullets": ["Restez calme.","En cas d’urgence, appelez toujours d’abord le 112.","Informez ensuite la sécurité au 0316 799476 et indiquez le lieu, les circonstances et le nombre de blessés.","En cas d’incendie, quittez le bâtiment par la sortie de secours la plus proche et suivez le personnel jusqu’au point de rassemblement."]},{"title": "Fumer","bullets": ["Il est uniquement permis de fumer dans les zones désignées."]}]},"es": {"languageName": "Español","ui": {"language": "Idioma","title": "Normas del recinto Duiven-QAR","subtitle": "La seguridad primero","intro": "Normas optimizadas para móvil. Pulse los pictogramas para llamar inmediatamente.","tapHint": "Pulse un pictograma para llamar directamente.","footer": "Piensa en seguridad. Actúa con seguridad. Mantente seguro."},"sections": [{"title": "Introducción","text": "Estas normas se aplican a todos los conductores, incluidos los subcontratados, en las instalaciones de FedEx Express en Duiven-QAR.","bullets": ["El objetivo es garantizar la seguridad, el orden y el correcto funcionamiento del recinto.","Siga siempre las normas locales y las instrucciones del personal de seguridad y de los shunters."]},{"title": "Normas de seguridad en el recinto","bullets": ["El límite de velocidad es de 15 km/h.","Al entrar por la puerta de seguridad hay circulación de sentido único. Siga recto y no gire inmediatamente a la izquierda.","Camine solo por las rutas peatonales designadas.","No acceda al almacén sin autorización.","Las drogas y la intoxicación pública están estrictamente prohibidas."]},{"title": "Medidas de protección personal","bullets": ["Use un chaleco reflectante cerrado.","Use calzado de seguridad clase S3 en el patio.","Utilice el equipo de seguridad adecuado al acoplar o manipular remolques.","Las chanclas, zapatillas y el calzado abierto no están permitidos."]},{"title": "Procedimiento de tarjeta – acceso al gatehouse","bullets": ["Recoja una tarjeta en el puesto de seguridad del gatehouse inferior.","La tarjeta da acceso al gatehouse y a la cantina durante el horario de apertura.","Devuelva la tarjeta al salir del gatehouse.","Las tarjetas no devueltas serán bloqueadas."]},{"title": "Instrucciones de aparcamiento","bullets": ["Aparque dentro de las plazas designadas.","Compruebe si hay vehículos particulares cerca antes de maniobrar.","Aparcar correctamente mejora la seguridad y evita daños.","Mantenga limpias y ordenadas las zonas de aparcamiento y operación."]},{"title": "Mantenga las zonas comunes limpias y cómodas","bullets": ["Deje las mesas, sillas y zonas compartidas limpias después de usarlas.","Utilice los cubos de basura para todos los residuos.","Vuelva a colocar las sillas en su sitio.","Mantenga limpios los aseos."]},{"title": "Ayúdenos a mantener limpio el patio","bullets": ["Utilice los contenedores para la basura.","No deje botellas, latas, vidrio roto, cartón, toallas de papel, colillas ni utensilios sucios en el suelo.","Cocinar o freír solo está permitido en la zona designada.","Los hornillos o bombonas de gas entre camiones están estrictamente prohibidos.","No está permitido lavar vehículos completos en el recinto."]},{"title": "Qué hacer en caso de emergencia","bullets": ["Mantenga la calma.","En una emergencia, llame siempre primero al 112.","Después informe al equipo de seguridad al 0316 799476 e indique la ubicación, las circunstancias y el número de heridos.","En caso de incendio, salga del edificio por la salida de emergencia más cercana y siga al personal hasta el punto de reunión."]},{"title": "Fumar","bullets": ["Solo se permite fumar en las zonas designadas."]}]},"it": {"languageName": "Italiano","ui": {"language": "Lingua","title": "Regole del piazzale Duiven-QAR","subtitle": "La sicurezza prima di tutto","intro": "Regole ottimizzate per mobile. Tocca i pittogrammi per chiamare subito.","tapHint": "Tocca un pittogramma per chiamare direttamente.","footer": "Pensa alla sicurezza. Agisci in sicurezza. Rimani al sicuro."},"sections": [{"title": "Introduzione","text": "Queste regole si applicano a tutti gli autisti, inclusi i subappaltatori, presso il sito FedEx Express di Duiven-QAR.","bullets": ["L’obiettivo è garantire sicurezza, ordine e il corretto funzionamento del sito.","Segua sempre le regole locali e le istruzioni del personale di sicurezza e degli shunter."]},{"title": "Regole di sicurezza sul sito","bullets": ["Il limite di velocità è di 15 km/h.","Entrando dal cancello di sicurezza il traffico è a senso unico. Procedere dritto e non svoltare subito a sinistra.","Camminare solo sui percorsi pedonali designati.","Non accedere al magazzino senza autorizzazione.","Droghe e ubriachezza pubblica sono severamente vietate."]},{"title": "Misure di protezione personale","bullets": ["Indossare un gilet ad alta visibilità chiuso.","Indossare scarpe di sicurezza classe S3 nel piazzale.","Usare dispositivi di sicurezza appropriati durante aggancio o movimentazione dei rimorchi.","Ciabatte, infradito e calzature aperte non sono ammesse."]},{"title": "Procedura badge – accesso gatehouse","bullets": ["Ritirare un badge al banco sicurezza nel gatehouse inferiore.","Il badge dà accesso al gatehouse e alla mensa durante gli orari di apertura.","Restituire il badge quando si lascia il gatehouse.","I badge non restituiti verranno bloccati."]},{"title": "Istruzioni di parcheggio","bullets": ["Parcheggiare entro gli spazi contrassegnati.","Controllare la presenza di veicoli privati nelle vicinanze prima di manovrare.","Parcheggiare correttamente migliora la sicurezza e previene danni.","Tenere pulite e ordinate le aree di parcheggio e operative."]},{"title": "Mantieni gli spazi comuni puliti e confortevoli","bullets": ["Lascia tavoli, sedie e spazi condivisi puliti dopo l’uso.","Usa i cestini per tutti i rifiuti.","Rimetti le sedie al loro posto dopo l’uso.","Mantieni puliti i servizi igienici."]},{"title": "Aiutaci a tenere pulito il piazzale","bullets": ["Usa i contenitori per i rifiuti.","Non lasciare a terra bottiglie, lattine, vetro rotto, cartone, salviette, mozziconi o stoviglie sporche.","Cucinare o friggere è consentito solo nell’area designata.","Fornelli o bombole di gas tra i camion sono severamente vietati.","Il lavaggio completo dei veicoli sul sito non è consentito."]},{"title": "Cosa fare in caso di emergenza","bullets": ["Mantieni la calma.","In caso di emergenza chiama sempre prima il 112.","Poi informa il team di sicurezza al numero 0316 799476 e comunica luogo, circostanze e numero dei feriti.","In caso di incendio lascia l’edificio attraverso l’uscita di emergenza più vicina e segui il personale fino al punto di raccolta."]},{"title": "Fumo","bullets": ["È consentito fumare solo nelle aree designate."]}]},"pt": {"languageName": "Português","ui": {"language": "Idioma","title": "Regras do pátio Duiven-QAR","subtitle": "Segurança em primeiro lugar","intro": "Regras otimizadas para telemóvel. Toque nos pictogramas para ligar imediatamente.","tapHint": "Toque num pictograma para ligar diretamente.","footer": "Pense em segurança. Aja com segurança. Mantenha-se seguro."},"sections": [{"title": "Introdução","text": "Estas regras aplicam-se a todos os motoristas, incluindo subcontratados, no local FedEx Express de Duiven-QAR.","bullets": ["O objetivo é segurança, ordem e correto funcionamento do local.","Siga sempre as regras locais e as instruções da segurança e dos shunters."]},{"title": "Regras de segurança no local","bullets": ["O limite de velocidade é de 15 km/h.","Ao entrar pelo portão de segurança, o trânsito é de sentido único. Siga em frente e não vire imediatamente à esquerda.","Caminhe apenas nas vias pedonais designadas.","Não entre no armazém sem autorização.","Drogas e intoxicação pública são estritamente proibidas."]},{"title": "Medidas de proteção pessoal","bullets": ["Use um colete de alta visibilidade fechado.","Use calçado de segurança classe S3 no pátio.","Use equipamento de segurança adequado ao acoplar ou manusear reboques.","Chinelos, pantufas e calçado aberto não são permitidos."]},{"title": "Procedimento do crachá – acesso ao gatehouse","bullets": ["Recolha um crachá no balcão de segurança do gatehouse inferior.","O crachá dá acesso ao gatehouse e à cantina durante o horário de funcionamento.","Devolva o crachá ao sair do gatehouse.","Crachás não devolvidos serão bloqueados."]},{"title": "Instruções de estacionamento","bullets": ["Estacione dentro das áreas demarcadas.","Verifique se existem veículos particulares por perto antes de manobrar.","Estacionar corretamente melhora a segurança e evita danos.","Mantenha limpas e organizadas as zonas de estacionamento e operação."]},{"title": "Mantenha os espaços comuns limpos e confortáveis","bullets": ["Deixe mesas, cadeiras e espaços partilhados limpos após a utilização.","Use os caixotes para todos os resíduos.","Volte a colocar as cadeiras no lugar.","Mantenha as casas de banho limpas."]},{"title": "Ajude-nos a manter o pátio limpo","bullets": ["Use os contentores de lixo.","Não deixe garrafas, latas, vidro partido, cartão, toalhas de papel, beatas ou loiça suja no chão.","Cozinhar ou fritar só é permitido na área designada.","Fogões a gás ou botijas de gás entre camiões são estritamente proibidos.","Não é permitido lavar veículos completos no local."]},{"title": "O que fazer em caso de emergência","bullets": ["Mantenha a calma.","Em emergências, ligue sempre primeiro para o 112.","Depois informe a segurança através do número 0316 799476 e indique local, circunstâncias e número de feridos.","Em caso de incêndio, saia do edifício pela saída de emergência mais próxima e siga o pessoal até ao ponto de encontro."]},{"title": "Fumar","bullets": ["Só é permitido fumar nas áreas designadas."]}]},"ro": {"languageName": "Română","ui": {"language": "Limbă","title": "Regulile curții Duiven-QAR","subtitle": "Siguranța pe primul loc","intro": "Reguli optimizate pentru mobil. Apasă pictogramele pentru apel direct.","tapHint": "Apasă pe pictogramă pentru apel direct.","footer": "Gândește sigur. Acționează sigur. Rămâi în siguranță."},"sections": [{"title": "Introducere","text": "Aceste reguli se aplică tuturor șoferilor, inclusiv subcontractorilor, la locația FedEx Express Duiven-QAR.","bullets": ["Scopul este siguranța, ordinea și funcționarea corectă a locației.","Respectați întotdeauna regulile locale și instrucțiunile personalului de securitate și ale shunterilor."]},{"title": "Reguli de siguranță pe site","bullets": ["Limita de viteză este 15 km/h.","La intrarea prin poarta de securitate, circulația este cu sens unic. Mergeți înainte și nu virați imediat la stânga.","Mergeți doar pe căile pietonale desemnate.","Nu intrați în depozit fără autorizație.","Drogurile și starea de ebrietate în public sunt strict interzise."]},{"title": "Măsuri de protecție personală","bullets": ["Purtați o vestă de siguranță cu vizibilitate mare, închisă.","Purtați încălțăminte de siguranță clasa S3 în curte.","Folosiți echipament de siguranță adecvat la andocare sau manipularea remorcilor.","Șlapii, papucii și încălțămintea deschisă nu sunt permise."]},{"title": "Procedura badge – acces gatehouse","bullets": ["Ridicați un badge de la biroul de securitate din gatehouse-ul de jos.","Badge-ul oferă acces la gatehouse și la cantină în timpul programului.","Predați badge-ul când părăsiți gatehouse-ul.","Badge-urile nepredate vor fi blocate."]},{"title": "Instrucțiuni de parcare","bullets": ["Parcați în interiorul spațiilor marcate.","Verificați dacă există vehicule personale în apropiere înainte de manevrare.","Parcarea corectă crește siguranța și previne deteriorarea altor vehicule.","Păstrați curate și ordonate zonele de parcare și cele operaționale."]},{"title": "Păstrați spațiile comune curate și confortabile","bullets": ["Lăsați mesele, scaunele și spațiile comune curate după utilizare.","Folosiți coșurile de gunoi pentru toate deșeurile.","Puneți scaunele la loc după utilizare.","Păstrați toaletele curate."]},{"title": "Ajutați-ne să păstrăm curtea curată","bullets": ["Folosiți containerele de deșeuri.","Nu lăsați pe jos sticle, doze, sticlă spartă, carton, prosoape de hârtie, mucuri de țigară sau vase murdare.","Gătitul sau prăjitul este permis doar în zona desemnată.","Aragazele cu gaz sau buteliile de gaz între camioane sunt strict interzise.","Spălarea completă a vehiculelor pe site nu este permisă."]},{"title": "Ce trebuie făcut în caz de urgență","bullets": ["Păstrați-vă calmul.","În caz de urgență, sunați întotdeauna mai întâi la 112.","Apoi informați securitatea la 0316 799476 și comunicați locația, circumstanțele și numărul răniților.","În caz de incendiu, părăsiți clădirea prin cea mai apropiată ieșire de urgență și urmați personalul până la punctul de adunare."]},{"title": "Fumat","bullets": ["Fumatul este permis doar în zonele desemnate."]}]},"ru": {"languageName": "Русский","ui": {"language": "Язык","title": "Правила территории Duiven-QAR","subtitle": "Безопасность прежде всего","intro": "Правила, оптимизированные для мобильных устройств. Нажмите на пиктограммы, чтобы сразу позвонить.","tapHint": "Нажмите на пиктограмму, чтобы позвонить напрямую.","footer": "Думайте о безопасности. Действуйте безопасно. Оставайтесь в безопасности."},"sections": [{"title": "Введение","text": "Эти правила распространяются на всех водителей, включая водителей субподрядчиков, на объекте FedEx Express Duiven-QAR.","bullets": ["Цель — обеспечить безопасность, порядок и надлежащую работу объекта.","Всегда соблюдайте местные правила и указания сотрудников службы безопасности и шунтеров."]},{"title": "Правила безопасности на территории","bullets": ["Ограничение скорости на территории — 15 км/ч.","При въезде через ворота службы безопасности действует одностороннее движение. Двигайтесь прямо и не поворачивайте сразу налево.","Ходите только по обозначенным пешеходным дорожкам.","Не заходите на склад без разрешения.","Наркотики и нахождение в общественном месте в состоянии опьянения строго запрещены."]},{"title": "Средства индивидуальной защиты","bullets": ["Носите закрытый сигнальный жилет повышенной видимости.","На территории носите защитную обувь класса S3.","Используйте соответствующие средства защиты при стыковке или работе с прицепами.","Шлепанцы, тапочки и открытая обувь на территории запрещены."]},{"title": "Процедура с бейджем – доступ в gatehouse","bullets": ["Получите бейдж на посту охраны в нижнем gatehouse.","Бейдж дает доступ в gatehouse и в столовую в часы работы.","Верните бейдж при выходе из gatehouse.","Невозвращенные бейджи будут заблокированы."]},{"title": "Инструкции по парковке","bullets": ["Паркуйтесь только в обозначенных парковочных местах.","Перед маневрированием проверьте, нет ли поблизости легковых автомобилей.","Правильная парковка повышает безопасность и помогает предотвратить повреждения.","Содержите парковочные и рабочие зоны в чистоте и порядке."]},{"title": "Содержите общие помещения в чистоте и порядке","bullets": ["После использования оставляйте столы, стулья и общие зоны чистыми.","Используйте мусорные баки для всех отходов.","Задвигайте стулья обратно и ставьте их на место.","Содержите туалеты в чистоте."]},{"title": "Помогите нам поддерживать чистоту на территории","bullets": ["Используйте контейнеры для мусора.","Не оставляйте на земле бутылки, банки, битое стекло, картон, бумажные полотенца, окурки или грязную посуду.","Готовить или жарить разрешается только в специально отведенной зоне.","Газовые плитки или газовые баллоны между грузовиками строго запрещены.","Мыть полностью транспортные средства на территории запрещено."]},{"title": "Что делать в случае чрезвычайной ситуации","bullets": ["Сохраняйте спокойствие.","В экстренной ситуации всегда сначала звоните по номеру 112.","Затем сообщите службе безопасности по номеру 0316 799476 и укажите место, обстоятельства и количество пострадавших.","В случае пожара покиньте здание через ближайший аварийный выход и следуйте за персоналом к месту сбора."]},{"title": "Курение","bullets": ["Курение разрешено только в специально отведенных местах."]}]},"be": {"languageName": "Беларуская","ui": {"language": "Мова","title": "Правілы тэрыторыі Duiven-QAR","subtitle": "Бяспека перш за ўсё","intro": "Правілы, аптымізаваныя для мабільных прылад. Націсніце на піктаграмы, каб адразу патэлефанаваць.","tapHint": "Націсніце на піктаграму, каб патэлефанаваць напрамую.","footer": "Думайце пра бяспеку. Дзейнічайце бяспечна. Заставайцеся ў бяспецы."},"sections": [{"title": "Уводзіны","text": "Гэтыя правілы дзейнічаюць для ўсіх кіроўцаў, у тым ліку субпадрадчыкаў, на аб’екце FedEx Express Duiven-QAR.","bullets": ["Мэта — забяспечыць бяспеку, парадак і належную працу аб’екта.","Заўсёды выконвайце мясцовыя правілы і ўказанні супрацоўнікаў аховы і шунтараў."]},{"title": "Правілы бяспекі на тэрыторыі","bullets": ["Абмежаванне хуткасці на тэрыторыі — 15 км/г.","Пры ўездзе праз вароты аховы дзейнічае аднабаковы рух. Едзьце проста і не паварочвайце адразу налева.","Хадзіце толькі па пазначаных пешаходных дарожках.","Не заходзьце на склад без дазволу.","Наркотыкі і знаходжанне ў грамадскім месцы ў стане ап’янення строга забаронены."]},{"title": "Сродкі індывідуальнай абароны","bullets": ["Насіце закрытую святлоадбівальную камізэльку высокай бачнасці.","На тэрыторыі насіце ахоўны абутак класа S3.","Выкарыстоўвайце адпаведныя сродкі бяспекі пры стыкоўцы або працы з прычэпамі.","Шлёпанцы, тэпцікі і адкрыты абутак на тэрыторыі забаронены."]},{"title": "Працэдура з бейджам – доступ у gatehouse","bullets": ["Атрымайце бейдж на пасту аховы ў ніжнім gatehouse.","Бейдж дае доступ у gatehouse і ў сталовую ў час працы.","Вярніце бейдж пры выхадзе з gatehouse.","Невярнутыя бейджы будуць заблакаваныя."]},{"title": "Інструкцыі па паркоўцы","bullets": ["Паркуйцеся толькі ў пазначаных месцах.","Перад манеўраваннем праверце, ці няма паблізу легкавых аўтамабіляў.","Правільная паркоўка павышае бяспеку і дапамагае прадухіліць пашкоджанні.","Трымайце парковачныя і аперацыйныя зоны ў чысціні і парадку."]},{"title": "Трымайце агульныя памяшканні ў чысціні і парадку","bullets": ["Пасля выкарыстання пакідайце сталы, крэслы і агульныя зоны чыстымі.","Выкарыстоўвайце смеццевыя бакі для ўсіх адходаў.","Адсуньце крэслы назад і пастаўце іх на месца.","Трымайце туалеты ў чысціні."]},{"title": "Дапамажыце падтрымліваць чысціню на тэрыторыі","bullets": ["Выкарыстоўвайце кантэйнеры для смецця.","Не пакідайце на зямлі бутэлькі, банкі, бітае шкло, кардон, папяровыя ручнікі, недакуркі або брудны посуд.","Гатаваць або смажыць дазваляецца толькі ў спецыяльна адведзенай зоне.","Газавыя пліткі або газавыя балоны паміж грузавікамі строга забаронены.","Мыццё транспартных сродкаў цалкам на тэрыторыі не дазваляецца."]},{"title": "Што рабіць у выпадку надзвычайнай сітуацыі","bullets": ["Захоўвайце спакой.","У экстранай сітуацыі заўсёды спачатку тэлефануйце па нумары 112.","Пасля гэтага паведаміце службе аховы па нумары 0316 799476 і ўкажыце месца, абставіны і колькасць пацярпелых.","У выпадку пажару пакіньце будынак праз бліжэйшы аварыйны выхад і ідзіце за персаналам да месца збору."]},{"title": "Курэнне","bullets": ["Курыць дазваляецца толькі ў спецыяльна адведзеных месцах."]}]},"hi": {"languageName": "हिन्दी","ui": {"language": "भाषा","title": "Duiven-QAR यार्ड हाउस रूल्स","subtitle": "सुरक्षा सबसे पहले","intro": "मोबाइल के लिए अनुकूलित नियम। तुरंत कॉल करने के लिए पिक्टोग्राम पर टैप करें।","tapHint": "सीधे कॉल करने के लिए पिक्टोग्राम पर टैप करें।","footer": "सुरक्षा के बारे में सोचें। सुरक्षित तरीके से काम करें। सुरक्षित रहें।"},"sections": [{"title": "परिचय","text": "ये नियम Duiven-QAR FedEx Express स्थान पर सभी ड्राइवरों, जिसमें सबकॉन्ट्रैक्ट ड्राइवर भी शामिल हैं, पर लागू होते हैं।","bullets": ["उद्देश्य सुरक्षा सुनिश्चित करना, व्यवस्था बनाए रखना और साइट के सही संचालन को समर्थन देना है।","हमेशा स्थानीय नियमों और सुरक्षा कर्मियों तथा शंटरों के निर्देशों का पालन करें।"]},{"title": "साइट सुरक्षा नियम","bullets": ["साइट पर गति सीमा 15 किमी/घंटा है।","सुरक्षा गेट से प्रवेश करते समय एक-तरफ़ा यातायात लागू है। सीधे जाएँ और तुरंत बाएँ न मुड़ें।","केवल निर्धारित पैदल मार्गों पर चलें।","अनुमति के बिना वेयरहाउस में प्रवेश न करें।","ड्रग्स और सार्वजनिक नशा सख्ती से प्रतिबंधित हैं।"]},{"title": "व्यक्तिगत सुरक्षा उपाय","bullets": ["बंद हाई-विजिबिलिटी सुरक्षा वेस्ट पहनें।","यार्ड में S3 श्रेणी के सुरक्षा जूते पहनें।","ट्रेलर डॉक करते समय या संभालते समय उपयुक्त सुरक्षा उपकरण का उपयोग करें।","फ्लिप-फ्लॉप, चप्पल और खुले जूते साइट पर अनुमति नहीं हैं।"]},{"title": "बैज प्रक्रिया – gatehouse प्रवेश","bullets": ["नीचे वाले gatehouse के सुरक्षा डेस्क से बैज लें।","बैज gatehouse और खुलने के समय कैंटीन तक पहुँच देता है।","gatehouse छोड़ते समय बैज वापस करें।","जो बैज वापस नहीं किए जाएँगे, उन्हें ब्लॉक कर दिया जाएगा।"]},{"title": "पार्किंग निर्देश","bullets": ["निर्धारित पार्किंग बॉक्स के भीतर ही पार्क करें।","मैन्युवर करने से पहले देखें कि आसपास कोई निजी वाहन तो नहीं है।","सही पार्किंग सुरक्षा बढ़ाती है और नुकसान को रोकने में मदद करती है।","पार्किंग और संचालन क्षेत्रों को साफ और व्यवस्थित रखें।"]},{"title": "साझा स्थानों को साफ और आरामदायक रखें","bullets": ["उपयोग के बाद मेज़, कुर्सियाँ और साझा क्षेत्र साफ छोड़ें।","सारे कचरे के लिए डस्टबिन का उपयोग करें।","कुर्सियों को पीछे करें और उनकी जगह पर रखें।","शौचालयों को साफ रखें।"]},{"title": "यार्ड को साफ रखने में हमारी मदद करें","bullets": ["सारे कचरे के लिए कचरा कंटेनरों का उपयोग करें।","ज़मीन पर बोतलें, कैन, टूटा काँच, कार्डबोर्ड, पेपर टॉवल, सिगरेट बट या गंदे बर्तन न छोड़ें।","खाना पकाना या तलना केवल निर्धारित क्षेत्र में ही अनुमति है।","ट्रकों के बीच गैस स्टोव या गैस सिलेंडर सख्ती से प्रतिबंधित हैं।","साइट पर पूरे वाहन को धोना अनुमति नहीं है।"]},{"title": "आपात स्थिति में क्या करें","bullets": ["शांत रहें।","आपात स्थिति में हमेशा पहले 112 पर कॉल करें।","इसके बाद 0316 799476 पर सुरक्षा टीम को सूचित करें और स्थान, परिस्थिति तथा घायल लोगों की संख्या बताएं।","आग लगने की स्थिति में निकटतम आपातकालीन निकास से बाहर जाएँ और कर्मचारियों का अनुसरण करते हुए एकत्रीकरण बिंदु तक पहुँचें।"]},{"title": "धूम्रपान","bullets": ["धूम्रपान केवल निर्धारित क्षेत्रों में ही अनुमति है।"]}]},"tr": {"languageName": "Türkçe","ui": {"language": "Dil","title": "Duiven-QAR saha kuralları","subtitle": "Önce güvenlik","intro": "Sürücüler için mobil uyumlu saha kuralları. Hemen aramak için piktogramlara dokunun.","tapHint": "Doğrudan aramak için bir piktograma dokunun.","footer": "Güvenliği düşün. Güvenli hareket et. Güvende kal."},"sections": [{"title": "Giriş","text": "Bu kurallar, Duiven-QAR FedEx Express sahasında bulunan tüm sürücüler ve taşeron sürücüler için geçerlidir.","bullets": ["Amaç güvenliği sağlamak, düzeni korumak ve sahanın düzgün işlemesini desteklemektir.","Her zaman yerel kurallara ve güvenlik personeli ile shunter talimatlarına uyun."]},{"title": "Saha güvenlik kuralları","bullets": ["Saha içindeki hız sınırı 15 km/saattir.","Güvenlik kapısından girişte tek yönlü trafik vardır. Düz gidin ve hemen sola dönmeyin.","Sadece belirtilen yaya yollarını kullanın.","İzin olmadan depoya girmeyin.","Uyuşturucu kullanımı ve kamuya açık alanda sarhoşluk kesinlikle yasaktır."]},{"title": "Kişisel koruyucu önlemler","bullets": ["Kapalı, yüksek görünürlüklü bir güvenlik yeleği giyin.","Sahada S3 sınıfı iş güvenliği ayakkabısı giyin.","Römork yanaştırırken veya işlem yaparken uygun güvenlik ekipmanı kullanın.","Terlik, ev terliği ve açık ayakkabı sahada yasaktır."]},{"title": "Kart prosedürü – gatehouse erişimi","bullets": ["Alt gatehouse’daki güvenlik masasından bir kart alın.","Kart, gatehouse’a ve açılış saatlerinde kantine erişim sağlar.","gatehouse’dan ayrılırken kartı iade edin.","İade edilmeyen kartlar bloke edilir."]},{"title": "Park talimatları","bullets": ["Belirlenmiş park alanları içinde park edin.","Manevra yapmadan önce yakınlarda özel araç olup olmadığını kontrol edin.","Doğru park etmek güvenliği artırır ve hasarı önlemeye yardımcı olur.","Park ve operasyon alanlarını temiz ve düzenli tutun."]},{"title": "Ortak alanları temiz ve düzenli tutun","bullets": ["Kullandıktan sonra masa, sandalye ve ortak alanları temiz bırakın.","Tüm atıklar için çöp kutularını kullanın.","Sandalyeleri geri itin ve yerine koyun.","Tuvaletleri temiz tutun."]},{"title": "Sahayı temiz tutmamıza yardım edin","bullets": ["Tüm atıklar için çöp konteynerlerini kullanın.","Yere şişe, kutu, kırık cam, karton, kâğıt havlu, sigara izmariti veya kirli tabak bırakmayın.","Yemek pişirmek veya kızartma yapmak yalnızca belirlenmiş alanda serbesttir.","Kamyonların arasında gaz ocağı veya gaz tüpü bulundurmak kesinlikle yasaktır.","Sahada araçların tamamını yıkamak yasaktır."]},{"title": "Acil durumda ne yapılmalı","bullets": ["Sakin olun.","Acil durumlarda her zaman önce 112’yi arayın.","Ardından 0316 799476 numarasından güvenlik ekibini bilgilendirin ve konumu, durumu ve yaralı sayısını bildirin.","Yangın durumunda en yakın acil çıkıştan çıkın ve personeli toplanma noktasına kadar takip edin."]},{"title": "Sigara","bullets": ["Sigara sadece belirlenmiş alanlarda içilebilir."]}]},"kk": {"languageName": "Қазақша","ui": {"language": "Тіл","title": "Duiven-QAR аула ережелері","subtitle": "Қауіпсіздік бірінші орында","intro": "Жүргізушілерге арналған мобильді құрылғыға бейімделген ережелер. Бірден қоңырау шалу үшін пиктограммаларды түртіңіз.","tapHint": "Тікелей қоңырау шалу үшін пиктограмманы түртіңіз.","footer": "Қауіпсіздікті ойлаңыз. Қауіпсіз әрекет етіңіз. Қауіпсіз болыңыз."},"sections": [{"title": "Кіріспе","text": "Бұл ережелер Duiven-QAR FedEx Express аумағындағы барлық жүргізушілерге, соның ішінде мердігер жүргізушілерге де қолданылады.","bullets": ["Мақсат — қауіпсіздікті қамтамасыз ету, тәртіпті сақтау және аумақтың дұрыс жұмыс істеуіне қолдау көрсету.","Әрқашан жергілікті ережелерді және қауіпсіздік қызметкерлері мен шунтерлердің нұсқауларын орындаңыз."]},{"title": "Аумақтағы қауіпсіздік ережелері","bullets": ["Аумақтағы жылдамдық шегі — 15 км/сағ.","Қауіпсіздік қақпасы арқылы кіргенде біржақты қозғалыс қолданылады. Тура жүріңіз және бірден солға бұрылмаңыз.","Тек белгіленген жаяу жүргінші жолдарымен жүріңіз.","Рұқсатсыз қоймаға кірмеңіз.","Есірткі және қоғамдық жерде мас болу қатаң түрде тыйым салынады."]},{"title": "Жеке қорғаныс шаралары","bullets": ["Жабық, жақсы көрінетін қауіпсіздік кеудешесін киіңіз.","Аулада S3 санатындағы қауіпсіздік аяқ киімін киіңіз.","Тіркемелерді тіркеу немесе олармен жұмыс істеу кезінде тиісті қорғаныс құралдарын қолданыңыз.","Шлепанцы, үй тәпішкелері және ашық аяқ киім аумақта рұқсат етілмейді."]},{"title": "Бейдж рәсімі – gatehouse қолжетімділігі","bullets": ["Төменгі gatehouse-тағы қауіпсіздік үстелінен бейдж алыңыз.","Бейдж gatehouse-қа және жұмыс уақытында асханаға кіруге мүмкіндік береді.","gatehouse-тан шыққанда бейджді қайтарыңыз.","Қайтарылмаған бейдждер бұғатталады."]},{"title": "Тұраққа қою нұсқаулары","bullets": ["Белгіленген тұрақ орындарының ішінде ғана тоқтаңыз.","Маневр жасамас бұрын жақын маңда жеңіл көлік бар-жоғын тексеріңіз.","Дұрыс тұраққа қою қауіпсіздікті арттырады және зақымның алдын алуға көмектеседі.","Тұрақ және жұмыс аймақтарын таза әрі реттелген күйде ұстаңыз."]},{"title": "Ортақ орындарды таза әрі жайлы ұстаңыз","bullets": ["Пайдаланғаннан кейін үстелдерді, орындықтарды және ортақ аймақтарды таза қалдырыңыз.","Барлық қалдықтар үшін қоқыс жәшіктерін пайдаланыңыз.","Орындықтарды артқа жылжытып, орнына қойыңыз.","Дәретханаларды таза ұстаңыз."]},{"title": "Ауланы таза ұстауға көмектесіңіз","bullets": ["Барлық қоқыс үшін қалдық контейнерлерін пайдаланыңыз.","Жерге бөтелке, банка, сынған әйнек, картон, қағаз сүлгі, темекі тұқылы немесе лас ыдыс қалдырмаңыз.","Тамақ пісіруге немесе қуыруға тек арнайы бөлінген жерде ғана рұқсат етіледі.","Жүк көліктерінің арасында газ плитасы немесе газ баллонын қолдануға қатаң тыйым салынады.","Аумақта көлікті толық жууға рұқсат етілмейді."]},{"title": "Төтенше жағдайда не істеу керек","bullets": ["Сабыр сақтаңыз.","Төтенше жағдайда әрқашан алдымен 112 нөміріне қоңырау шалыңыз.","Одан кейін 0316 799476 нөмірі арқылы қауіпсіздік тобына хабарлап, орнын, жағдайын және зардап шеккендер санын айтыңыз.","Өрт болған жағдайда ең жақын авариялық шығу жолы арқылы шығып, қызметкерлерді жиналу орнына дейін еріңіз."]},{"title": "Темекі шегу","bullets": ["Темекі шегуге тек арнайы белгіленген жерлерде ғана рұқсат етіледі."]}]},"ky": {"languageName": "Кыргызча","ui": {"language": "Тил","title": "Duiven-QAR короо эрежелери","subtitle": "Коопсуздук биринчи орунда","intro": "Айдоочулар үчүн мобилдик түзмөктөргө ылайыкташтырылган эрежелер. Дароо чалуу үчүн пиктограммаларды басыңыз.","tapHint": "Түз чалуу үчүн пиктограмманы басыңыз.","footer": "Коопсуздукту ойлогула. Коопсуз аракет кылгыла. Коопсуз болгула."},"sections": [{"title": "Киришүү","text": "Бул эрежелер Duiven-QAR FedEx Express аймагындагы бардык айдоочуларга, анын ичинде субподрядчы айдоочуларга да тиешелүү.","bullets": ["Максат — коопсуздукту камсыз кылуу, тартипти сактоо жана аймактын туура иштешин колдоо.","Ар дайым жергиликтүү эрежелерди жана коопсуздук кызматкерлери менен шунтерлердин көрсөтмөлөрүн аткарыңыз."]},{"title": "Аймактагы коопсуздук эрежелери","bullets": ["Аймактагы ылдамдык чеги 15 км/саат.","Коопсуздук дарбазасы аркылуу киргенде бир багыттуу кыймыл колдонулат. Түз жүрүңүз жана дароо солго бурулбаңыз.","Белгиленген жөө адамдар жолдору менен гана жүрүңүз.","Уруксатсыз кампага кирбеңиз.","Баңгизат жана коомдук жерде мас болуу катуу тыюу салынат."]},{"title": "Жеке коргонуу чаралары","bullets": ["Жабык, жакшы көрүнүүчү коопсуздук жилетин кийиңиз.","Аймакта S3 класстагы коопсуздук бут кийимин кийиңиз.","Тиркемелерди туташтырууда же иштетүүдө тиешелүү коопсуздук жабдууларын колдонуңуз.","Шлепанцы, үй тапочкалары жана ачык бут кийим аймакта уруксат берилбейт."]},{"title": "Бейдж тартиби – gatehouse кирүү мүмкүнчүлүгү","bullets": ["Төмөнкү gatehouse'тагы коопсуздук үстөлүнөн бейдж алыңыз.","Бейдж gatehouse'ка жана иш убактысында ашканага кирүүгө мүмкүнчүлүк берет.","gatehouse'тан чыкканда бейджди кайтарыңыз.","Кайтарылбаган бейдждер бөгөттөлөт."]},{"title": "Унаа токтотуу көрсөтмөлөрү","bullets": ["Белгиленген унаа токтотуучу орундардын ичинде токтотуңуз.","Маневр жасоодон мурда жакын жерде жеңил унаалар бар-жогун текшериңиз.","Туура токтотуу коопсуздукту жогорулатат жана зыяндын алдын алууга жардам берет.","Унаа токтотуучу жана иш аймактарын таза жана тартиптүү кармаңыз."]},{"title": "Жалпы жайларды таза жана ыңгайлуу кармаңыз","bullets": ["Колдонгондон кийин үстөлдөрдү, отургучтарды жана жалпы жайларды таза калтырыңыз.","Бардык таштандылар үчүн таштанды челектерин колдонуңуз.","Отургучтарды артка жылдырып, ордуна коюңуз.","Дааратканаларды таза кармаңыз."]},{"title": "Аймакты таза кармоого жардам бериңиз","bullets": ["Бардык таштандылар үчүн таштанды контейнерлерин колдонуңуз.","Жерге бөтөлкө, банка, сынган айнек, картон, кагаз сүлгү, тамеки калдыгы же кир идиш калтырбаңыз.","Тамак бышыруу же кууруу атайын белгиленген жерде гана уруксат берилет.","Жүк ташуучу унаалардын ортосунда газ плитасын же газ баллонун колдонууга катуу тыюу салынат.","Аймакта унааны толугу менен жуууга уруксат жок."]},{"title": "Өзгөчө кырдаалда эмне кылуу керек","bullets": ["Тынч болуңуз.","Өзгөчө кырдаалда ар дайым биринчи болуп 112 номерине чалыңыз.","Андан кийин 0316 799476 номерине коопсуздук кызматына кабарлап, жайгашкан жерди, жагдайды жана жабыркагандардын санын айтыңыз.","Өрт чыккан учурда эң жакын авариялык чыгуу жолу менен чыгып, кызматкерлерди чогулуу жайына чейин ээрчиңиз."]},{"title": "Чылым чегүү","bullets": ["Чылым чегүүгө атайын белгиленген жерлерде гана уруксат берилет."]}]}};
+const languageOrder = ["en", "de", "nl", "pl", "hu", "fr", "es", "it", "pt", "ro", "ru", "be", "hi", "tr", "kk", "ky"];
+const sectionIcons = [
+  ["i","purple"],
+  ["→","purple"],
+  ["✓","orange"],
+  ["B","purple"],
+  ["P","orange"],
+  ["G","purple"],
+  ["Y","orange"],
+  ["!","orange"],
+  ["S","purple"]
+];
+const mediaMap = {
+  2: {
+    3: [{src:"img/ppe.png", alt:"High-visibility vest and safety shoes required. Open footwear is not allowed."}]
+  },
+  4: {
+    0: [{src:"img/parking-trucks.png", alt:"Park within the designated parking boxes."}],
+    3: [{src:"img/parking-clean-orderly.png", alt:"Parking and operational areas must stay clean and orderly."}]
+  },
+  5: {
+    2: [{src:"img/table-chairs.png", alt:"Slide chairs back and return them to their place."}],
+    3: [{src:"img/toilet.png", alt:"Keep the toilets clean."}]
+  },
+  6: {
+    0: [{src:"img/bin-use.png", alt:"Use the waste containers for trash."}],
+    2: [{src:"img/cooking.png", alt:"Cooking or frying is allowed only in the designated area."}]
+  }
+};
+
+const select = document.getElementById("langSelect");
+const sectionsEl = document.getElementById("sections");
+const miniTitle = document.getElementById("miniTitle");
+const miniSubtitle = document.getElementById("miniSubtitle");
+const heroTitle = document.getElementById("heroTitle");
+const heroText = document.getElementById("heroText");
+const tapHint = document.getElementById("tapHint");
+const footerText = document.getElementById("footerText");
+const langLabel = document.getElementById("langLabel");
+
+function detectLanguage() {
+  try {
+    const qp = new URLSearchParams(window.location.search).get("lang") || "";
+    const short = String(qp).toLowerCase().split("-")[0];
+    if (short && content[short]) return short;
+  } catch (e) {}
+  const saved = localStorage.getItem("houseRulesLang");
+  if (saved && content[saved]) return saved;
+  const langs = navigator.languages || [navigator.language || "en"];
+  for (const lang of langs) {
+    const short = String(lang).toLowerCase().split("-")[0];
+    if (content[short]) return short;
+  }
+  return "en";
+}
+
+function buildLanguageOptions() {
+  select.innerHTML = languageOrder.map(code => `<option value="${code}">${content[code].languageName}</option>`).join("");
+}
+
+function renderMedia(sectionIndex, bulletIndex) {
+  const items = (mediaMap[sectionIndex] && mediaMap[sectionIndex][bulletIndex]) || [];
+  if (!items.length) return "";
+  return items.map(item => `
+    <figure class="section-media">
+      <img src="${item.src}" alt="${item.alt}" loading="lazy" />
+    </figure>
+  `).join("");
+}
+
+
+const emergencyInlinePicto = `<a href="tel:112" class="inline-call-link" aria-label="Call 112"><img src="img/emergency-pictogram.png" alt="112 pictogram" class="inline-call-picto" /></a>`;
+const securityInlinePicto = `<a href="tel:+31316799476" class="inline-call-link" aria-label="Call security"><img src="img/security-pictogram.png" alt="Security pictogram" class="inline-call-picto" /></a>`;
+
+function injectInlinePictos(text) {
+  if (!text) return "";
+  return text
+    .replace("112", emergencyInlinePicto)
+    .replace("0316 799476", securityInlinePicto);
+}
+
+
+function render(lang) {
+  const t = content[lang] || content.en;
+  document.documentElement.lang = lang;
+  select.value = lang;
+  localStorage.setItem("houseRulesLang", lang);
+
+  langLabel.textContent = t.ui.language;
+  miniTitle.textContent = t.ui.title;
+  miniSubtitle.textContent = t.ui.subtitle;
+  heroTitle.textContent = t.ui.title;
+  heroText.textContent = t.ui.intro;
+  tapHint.textContent = t.ui.tapHint;
+  footerText.innerHTML = `${t.ui.footer}<small>${t.ui.subtitle}</small>`;
+
+  sectionsEl.innerHTML = t.sections.map((section, sectionIndex) => {
+    const [iconChar, iconColor] = sectionIcons[sectionIndex] || ["•", "purple"];
+    const intro = section.text ? `<p>${section.text}</p>` : "";
+    const bulletsHtml = (section.bullets || []).map((item, bulletIndex) => `
+      <div class="bullet-item">
+        <div class="bullet-text">${injectInlinePictos(item)}</div>
+        ${renderMedia(sectionIndex, bulletIndex)}
+      </div>
+    `).join("");
+    return `
+      <article class="section-card">
+        <div class="section-head">
+          <div class="section-icon ${iconColor}">${iconChar}</div>
+          <h2 class="section-title">${section.title}</h2>
+        </div>
+        <div class="section-body">
+          ${intro}
+          <div class="bullet-list">${bulletsHtml}</div>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+buildLanguageOptions();
+render(detectLanguage());
+select.addEventListener("change", (e) => render(e.target.value));
+
+const splash = document.getElementById("splash");
+const app = document.getElementById("app");
+const revealOverlay = document.getElementById("revealOverlay");
+const revealArrow = document.getElementById("revealArrow");
+const fedexLogoSplash = document.getElementById("fedexLogoSplash");
+// Always animate regardless of the user’s reduced motion preference.  We no longer
+// suppress animations via CSS and the splash hides immediately only when
+// reducedMotion is explicitly set to true.  By default this flag remains false.
+const urlParams = new URLSearchParams(window.location.search);
+const embeddedMode = urlParams.get("embedded") === "1";
+if (embeddedMode) {
+  document.body.classList.add("embedded");
+}
+const reducedMotion = embeddedMode;
+
+// Internal flag to ensure the reveal animation runs at most once.  Both the
+// default timeout (below) and the explicit load‑triggered logic will call
+// animateArrowReveal(); whichever call happens first will set this flag and
+// subsequent calls will return immediately.
+let revealStarted = false;
+
+// When animations are enabled (reducedMotion is false) we want to wait until
+// both the FedEx logo and the reveal arrow have loaded before starting the
+// reveal.  Because the default behaviour also triggers animateArrowReveal()
+// after a 1 second timeout, we use the revealStarted flag to guard against
+// double execution.  If the images are ready the animation begins after a
+// 1 second delay; otherwise load listeners wait for the resources to finish.
+if (!reducedMotion) {
+  const startReveal = () => {
+    setTimeout(() => {
+      animateArrowReveal();
+    }, 1000);
+  };
+  const logoReady = fedexLogoSplash.complete && fedexLogoSplash.naturalWidth > 0;
+  const arrowReady = revealArrow.complete && revealArrow.naturalWidth > 0;
+  if (logoReady && arrowReady) {
+    startReveal();
+  } else {
+    let pending = 0;
+    const onLoad = () => {
+      pending--;
+      if (pending === 0) startReveal();
+    };
+    if (!logoReady) {
+      pending++;
+      fedexLogoSplash.addEventListener("load", onLoad, { once: true });
+    }
+    if (!arrowReady) {
+      pending++;
+      revealArrow.addEventListener("load", onLoad, { once: true });
+    }
+  }
+}
+
+function setArrowTransform(scale, tx, ty) {
+  // Apply a CSS transform on the reveal arrow.  We place the scale first so
+  // that the subsequent translation (tx, ty) applies after scaling, making it
+  // straightforward to compute a pixel offset for the scaled image.  See
+  // animateArrowReveal() for how tx and ty are calculated.
+  revealArrow.style.transform = `scale(${scale}) translate(${tx}px, ${ty}px)`;
+}
+
+function animateArrowReveal() {
+  // Prevent multiple invocations.  If the reveal has already started, return
+  // immediately without doing anything.
+  if (revealStarted) return;
+  revealStarted = true;
+
+  // Show the arrow.  It starts off hidden (opacity 0) to avoid flashing at
+  // its natural size before the animation begins.
+  revealArrow.style.opacity = "1";
+
+
+  // Compute the bounding rect of the splash logo.  The logo must be loaded
+  // before invoking this function; otherwise rect.width will be 0 and the
+  // animation will not position the arrow correctly.
+  const rect = fedexLogoSplash.getBoundingClientRect();
+  // Natural dimensions of the arrow image.  We use the actual image size
+  // instead of hard‑coding the values to allow the browser to fetch the
+  // intrinsic dimensions from the SVG.  If naturalWidth is 0 (e.g. image
+  // hasn’t loaded) we fall back to the known width/height.
+  const naturalArrowWidth = revealArrow.naturalWidth || 159.206;
+  const naturalArrowHeight = revealArrow.naturalHeight || 167.775;
+
+  // These fractions place the arrow’s centre on the negative space between
+  // the “E” and “x” in the FedEx logo.  They have been calibrated against
+  // the actual FedEx Express artwork so the arrow aligns with the logo’s
+  // white negative space.  Feel free to fine‑tune them by a few hundredths
+  // if the positioning looks off by a pixel or two on your deployment.
+  // These fractions place the arrow’s centre on the negative space between
+  // the “E” and “x” in the FedEx logo.  Adjust by a few hundredths if needed
+  // to fine‑tune the alignment once deployed.
+  const arrowRelativeX = 0.72;
+  const arrowRelativeY = 0.42;
+
+  // The relative width of the arrow compared to the splash logo width.  A
+  // value around 0.17 matches the proportion of the hidden arrow in the
+  // FedEx logo.  Adjust this value up or down if the arrow appears too
+  // large or too small during the reveal.
+  const arrowWidthFrac = 0.17;
+
+  // Starting scale factor: scale the arrow down so that its width matches
+  // arrowWidthFrac of the splash logo’s width.
+  const startScale = (rect.width * arrowWidthFrac) / naturalArrowWidth;
+
+  // Start centre coordinates within the splash logo.
+  const startCenterX = rect.left + rect.width * arrowRelativeX;
+  const startCenterY = rect.top + rect.height * arrowRelativeY;
+
+  // Final centre coordinates at the centre of the viewport.
+  const centerX = window.innerWidth / 2;
+  const centerY = window.innerHeight / 2;
+
+  // Final scale factor for the reveal.  A value around 7 makes the arrow
+  // expand to cover most of the screen.  You can adjust this number to
+  // control how far the arrow grows.
+  // Final scale factor for the reveal.  A value around 7 makes the arrow
+  // expand to cover most of the screen.  You can adjust this number to
+  // control how far the arrow grows.
+  const finalScale = 7;
+
+  // Compute translation offsets for the transform `scale(...) translate(...)`.
+  // Because translation is applied after scaling, the offsets are computed
+  // against the scaled dimensions.
+  const startTx = startCenterX - (naturalArrowWidth * startScale) / 2;
+  const startTy = startCenterY - (naturalArrowHeight * startScale) / 2;
+
+  const finalTx = centerX - (naturalArrowWidth * finalScale) / 2;
+  const finalTy = centerY - (naturalArrowHeight * finalScale) / 2;
+
+  // Mark the application as ready so the rest of the page content can fade in.
+  app.classList.add("ready");
+
+  // Initialise the arrow’s transform without transition.
+  setArrowTransform(startScale, startTx, startTy);
+
+  // Kick off the animation after a small delay so the splash zoom effect
+  // synchronises nicely with the arrow growth.  The splash.inner element
+  // itself zooms via CSS when the `phase-zoom` class is added.
+  setTimeout(() => {
+    splash.classList.add("phase-zoom");
+    // Apply a smooth transition for the arrow.  We use a cubic bezier
+    // matching the splash zoom for consistency.  The !important flag ensures
+    // our animation isn’t suppressed by any global reduced motion settings.
+    revealArrow.style.transition = "transform 1.2s cubic-bezier(.2,.7,.15,1) !important";
+    setArrowTransform(finalScale, finalTx, finalTy);
+  }, 120);
+
+  // Fade out the splash and overlay after the arrow has grown.
+  setTimeout(() => {
+    splash.classList.add("hide");
+    revealOverlay.style.opacity = "0";
+  }, 1250);
+
+  // Remove the overlay completely once the animation is done.
+  setTimeout(() => {
+    if (revealOverlay) revealOverlay.remove();
+  }, 1700);
+}
+
+if (reducedMotion) {
+  app.classList.add("ready");
+  splash.classList.add("hide");
+  if (revealOverlay) revealOverlay.remove();
+} else {
+  setTimeout(() => {
+    animateArrowReveal();
+  }, 1000);
+}</script>
+</body>
+</html>

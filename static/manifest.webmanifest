@@ -1,9 +1,9 @@
 {
-  "name": "Driver Status",
-  "short_name": "DriverStatus",
+  "name": "FedEx Driver Portal",
+  "short_name": "Driver Portal",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
+  "background_color": "#2f014f",
   "theme_color": "#4D148C",
   "icons": [
     {

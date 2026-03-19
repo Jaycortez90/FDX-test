@@ -41,14 +41,14 @@ app = FastAPI(title="Driver Status")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+IMG_DIR = os.path.join(BASE_DIR, "img")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
+os.makedirs(IMG_DIR, exist_ok=True)
 
-# Background image path used by the website:
-# Put your uploaded image into: static/bg.png
-# (same folder as this main.py, inside "static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/img", StaticFiles(directory=IMG_DIR), name="img")
 
 # Excel lookup files (server-side destination calculation)
 # Optional env overrides:
@@ -2187,6 +2187,14 @@ def sw() -> Response:
     return Response(content=SERVICE_WORKER_JS, media_type="application/javascript")
 
 
+
+@app.get("/house-rules")
+def house_rules() -> Response:
+    path = os.path.join(BASE_DIR, "index.html")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="house rules page not found")
+    return FileResponse(path, media_type="text/html")
+
 @app.get("/")
 def index() -> HTMLResponse:
     return HTMLResponse(INDEX_HTML)
@@ -2209,217 +2217,268 @@ INDEX_HTML = r"""<!doctype html>
   <meta name="theme-color" content="#4D148C" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      min-height: 100vh;
-      background: url('/static/bg.png') no-repeat center center fixed;
-      background-size: cover;
-    }
-    .wrap {
-      width: min(860px, calc(100% - 24px));
-      margin: 0 auto;
-      padding: 18px 0 24px;
-    }
-    .topcard {
-      background: rgba(255,255,255,0.45);
-      border-radius: 16px;
-      padding: 14px;
-      border: 1px solid rgba(0,0,0,0.08);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.10);
-    }
-    input {
-      font-size: 16px;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid rgba(0,0,0,0.18);
-      background: rgba(255,255,255,0.60);
-      outline: none;
-    }
-    input:focus {
-      border-color: rgba(77,20,140,0.55);
-      box-shadow: 0 0 0 3px rgba(77,20,140,0.18);
-    }
-
-    .btn {
-      font-size: 16px;
-      padding: 10px 16px;
-      border-radius: 12px;
-      border: none;
-      cursor: pointer;
-      font-weight: 700;
-      letter-spacing: 0.2px;
-      box-shadow: 0 10px 18px rgba(0,0,0,0.18);
-      transition: transform 0.08s ease, filter 0.15s ease, box-shadow 0.15s ease;
-      user-select: none;
-      -webkit-tap-highlight-color: transparent;
-    }
-    .btn:hover {
-      filter: brightness(1.08);
-      transform: translateY(-1px);
-      box-shadow: 0 12px 22px rgba(0,0,0,0.22);
-    }
-    .btn:active {
-      transform: translateY(0px);
-      filter: brightness(0.98);
-      box-shadow: 0 8px 14px rgba(0,0,0,0.18);
-    }
-    .btn:focus-visible {
-      outline: none;
-      box-shadow: 0 0 0 3px rgba(77,20,140,0.24), 0 10px 18px rgba(0,0,0,0.18);
-    }
-
-    .btn-primary {
-      color: #ffffff;
-      background: linear-gradient(180deg, rgba(104,68,232,1) 0%, rgba(60,32,170,1) 100%);
-    }
-
-    .btn-secondary {
-      color: rgba(25,25,35,1);
-      background: linear-gradient(180deg, rgba(245,245,255,0.70) 0%, rgba(220,220,235,0.45) 100%);
-      border: 1px solid rgba(255,255,255,0.35);
-    }
-    .row { display: flex; gap: 8px; }
-    .row > * { flex: 1; }
-    .row-main > input { flex: 1 1 auto; }
-    .row-main > button { flex: 0 0 120px; }
-    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin-top: 12px; background: rgba(255,255,255,0.45); }
-    .muted { color: #666; }
-    .status-big { font-size: 22px; font-weight: 700; line-height: 1.25; }
-    .ok { border-color: #bfe6c3; }
-    .warn { border-color: #ffd18a; }
-    .err { border-color: #f5b5b5; }
-
-    #map {
-      height: clamp(240px, 42vh, 460px);
-      width: 100%;
-      border-radius: 12px;
-      border: 1px solid rgba(0,0,0,0.18);
-      overflow: hidden;
-      background: rgba(255,255,255,0.35);
-    }
-
-    .langbar {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      margin: 8px 0 10px;
-      flex-wrap: wrap;
-    }
-    .flagbtn {
-      width: 38px;
-      height: 38px;
-      border-radius: 999px;
-      border: 1px solid rgba(0,0,0,0.16);
-      background: rgba(255,255,255,0.55);
-      cursor: pointer;
-      font-size: 22px;
-      line-height: 1;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 8px 16px rgba(0,0,0,0.12);
-      transition: transform 0.08s ease, filter 0.15s ease, box-shadow 0.15s ease;
-      user-select: none;
-      -webkit-tap-highlight-color: transparent;
-      padding: 0;
-    }
-    .flagbtn:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 10px 18px rgba(0,0,0,0.16); }
-    .flagbtn:active { transform: translateY(0px); filter: brightness(0.98); box-shadow: 0 7px 14px rgba(0,0,0,0.12); }
-    .flagbtn.active {
-      outline: none;
-      border-color: rgba(77,20,140,0.55);
-      box-shadow: 0 0 0 3px rgba(77,20,140,0.18), 0 8px 16px rgba(0,0,0,0.12);
-    }
-
-    @media (max-width: 420px) {
-      .row { flex-direction: column; }
-      .row-main > button { flex: 0 0 auto; width: 100%; }
-      body { background-attachment: scroll; }
-    }
-    a { color: inherit; }
-  
-    /* House rules modal */
-    .modal-backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.45);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 18px;
-      z-index: 9999;
-    }
-    .modal {
-      width: min(920px, 100%);
-      max-height: calc(100vh - 36px);
-      overflow: auto;
-      background: rgba(255,255,255,0.95);
-      border-radius: 16px;
-      border: 1px solid rgba(0,0,0,0.12);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.35);
-    }
-    .modal-header {
-      padding: 12px 14px;
-      border-bottom: 1px solid rgba(0,0,0,0.10);
-    }
-    .modal-title { font-size: 18px; font-weight: 700; }
-    .modal-body { padding: 12px 14px 14px; }
-
-    .hr-text {
-      margin-top: 10px;
-      padding: 10px 12px;
-      border-radius: 12px;
-      background: rgba(255,255,255,0.65);
-      border: 1px solid rgba(0,0,0,0.08);
-    }
-    .hr-text h3 { margin: 10px 0 6px; font-size: 15px; }
-    .hr-text ul { margin: 6px 0 10px 18px; }
-    .hr-text li { margin: 2px 0; }
-
-    .hr-img {
-      width: 100%;
-      height: auto;
-      display: block;
-      border-radius: 12px;
-      border: 1px solid rgba(0,0,0,0.12);
-      background: rgba(255,255,255,0.85);
-      margin: 8px 0 10px;
-    }
-
-    .hr-accept { margin-top: 12px; display: flex; gap: 10px; align-items: center; }
-    .hr-accept-label { font-weight: 700; }
-
-    .switch { position: relative; display: inline-block; width: 50px; height: 28px; }
-    .switch input { opacity: 0; width: 0; height: 0; }
-    .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: #bbb;
-      transition: .2s;
-      border-radius: 999px;
-    }
-    .slider:before {
-      position: absolute;
-      content: "";
-      height: 22px;
-      width: 22px;
-      left: 3px;
-      top: 3px;
-      background: white;
-      transition: .2s;
-      border-radius: 50%;
-    }
-    .switch input:checked + .slider { background: #4D148C; }
-    .switch input:checked + .slider:before { transform: translateX(22px); }
-
-  </style>
+  :root {
+    --fx-purple:#2f014f;
+    --fx-purple-2:#4d148c;
+    --fx-orange:#ff6600;
+    --panel:#3b0c63;
+    --panel-2:#4d148c;
+    --text:#ffffff;
+    --muted:#eadbff;
+    --line:rgba(255,255,255,.22);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: linear-gradient(135deg,#24003d 0%, #4d148c 62%, #ff6600 140%);
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  a { color: inherit; }
+  .wrap {
+    width: min(980px, calc(100% - 24px));
+    margin: 0 auto;
+    padding: 16px 0 28px;
+  }
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 0;
+    margin-bottom: 14px;
+    background: rgba(47,1,79,.96);
+    border-bottom: 2px solid var(--fx-orange);
+    backdrop-filter: blur(6px);
+  }
+  .topleft { display:flex; align-items:center; gap:12px; min-width:0; }
+  .logo-img { display:block; width:154px; height:auto; flex:0 0 auto; }
+  .toptext strong { display:block; font-size:1rem; letter-spacing:-.02em; color:#fff; }
+  .toptext small { display:block; color:var(--muted); font-weight:700; }
+  .hero-card {
+    background: var(--panel-2);
+    border: 2px solid var(--line);
+    padding: 18px;
+    margin-bottom: 14px;
+  }
+  .eyebrow {
+    display:inline-block;
+    padding:6px 10px;
+    background:var(--fx-orange);
+    color:#fff;
+    font-weight:900;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+    font-size:.76rem;
+    margin-bottom:10px;
+  }
+  #titleH2 {
+    margin: 0;
+    font-size: 2rem;
+    line-height: 1.02;
+    letter-spacing: -.04em;
+    color: #fff;
+  }
+  .search-panel {
+    margin-top: 14px;
+    background: rgba(47,1,79,.48);
+    border: 2px solid rgba(255,255,255,.14);
+    padding: 14px;
+  }
+  input {
+    font-size: 16px;
+    padding: 12px 14px;
+    border: 2px solid var(--line);
+    background: rgba(255,255,255,.08);
+    color: #fff;
+    outline: none;
+  }
+  input::placeholder { color: rgba(234,219,255,.82); }
+  input:focus {
+    border-color: rgba(255,255,255,.42);
+    box-shadow: 0 0 0 3px rgba(255,255,255,.10);
+  }
+  .btn {
+    font-size: 16px;
+    padding: 12px 16px;
+    border: none;
+    cursor: pointer;
+    font-weight: 800;
+    letter-spacing: .2px;
+    transition: transform .08s ease, filter .15s ease, box-shadow .15s ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
+  .btn:active { transform: translateY(0); filter: brightness(.98); }
+  .btn-primary {
+    color: #fff;
+    background: var(--fx-orange);
+    box-shadow: 0 10px 18px rgba(0,0,0,.18);
+  }
+  .btn-secondary {
+    color: #fff;
+    background: var(--panel);
+    border: 2px solid var(--line);
+    box-shadow: 0 10px 18px rgba(0,0,0,.12);
+  }
+  .row { display:flex; gap:8px; }
+  .row > * { flex:1; }
+  .row-main > input { flex:1 1 auto; }
+  .row-main > button { flex:0 0 140px; }
+  .card {
+    border: 2px solid var(--line);
+    padding: 16px;
+    margin-top: 12px;
+    background: var(--panel);
+  }
+  .muted { color: var(--muted); }
+  .status-big { font-size: 22px; font-weight: 800; line-height: 1.25; }
+  .ok { border-color: rgba(88,207,131,.65); }
+  .warn { border-color: rgba(255,209,138,.70); }
+  .err { border-color: rgba(255,133,133,.72); }
+  #map {
+    height: clamp(240px, 42vh, 460px);
+    width: 100%;
+    border: 2px solid rgba(255,255,255,.12);
+    overflow: hidden;
+    background: rgba(255,255,255,.08);
+  }
+  .langbar {
+    display:flex;
+    gap:10px;
+    align-items:center;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+  }
+  .flagbtn {
+    width: 38px;
+    height: 38px;
+    border-radius: 999px;
+    border: 2px solid var(--line);
+    background: var(--panel);
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 16px rgba(0,0,0,.16);
+    transition: transform .08s ease, filter .15s ease, box-shadow .15s ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    padding: 0;
+  }
+  .flagbtn:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 10px 18px rgba(0,0,0,.18); }
+  .flagbtn:active { transform: translateY(0); filter: brightness(.98); }
+  .flagbtn.active {
+    border-color: var(--fx-orange);
+    box-shadow: 0 0 0 3px rgba(255,102,0,.16), 0 8px 16px rgba(0,0,0,.12);
+  }
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(17,5,32,.78);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    z-index: 9999;
+  }
+  .modal {
+    width: min(1180px, 100%);
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    background: var(--panel);
+    border: 2px solid var(--line);
+    box-shadow: 0 20px 60px rgba(0,0,0,.35);
+  }
+  .modal-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 12px 14px;
+    border-bottom: 2px solid var(--fx-orange);
+    background: rgba(47,1,79,.96);
+  }
+  .modal-title { font-size: 18px; font-weight: 800; color:#fff; }
+  .modal-body { padding: 0 14px 14px; }
+  .hr-text {
+    margin-top: 10px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+  }
+  .hr-frame {
+    width: 100%;
+    min-height: 72vh;
+    border: 2px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.05);
+  }
+  .hr-accept {
+    margin-top: 12px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 14px;
+    border: 2px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.06);
+  }
+  .hr-accept-label { color:#fff; font-weight:800; }
+  .switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #8862a4;
+    transition: .2s;
+    border-radius: 999px;
+  }
+  .slider:before {
+    position: absolute;
+    content: "";
+    height: 22px;
+    width: 22px;
+    left: 3px;
+    top: 3px;
+    background: white;
+    transition: .2s;
+    border-radius: 50%;
+  }
+  .switch input:checked + .slider { background: var(--fx-orange); }
+  .switch input:checked + .slider:before { transform: translateX(22px); }
+  @media (max-width: 720px) {
+    .topbar { align-items:flex-start; flex-direction:column; }
+    .langbar { justify-content:flex-start; }
+  }
+  @media (max-width: 520px) {
+    #titleH2 { font-size: 1.72rem; }
+    .logo-img { width: 126px; }
+    .toptext strong { font-size: .92rem; }
+    .toptext small { font-size: .8rem; }
+    .row { flex-direction: column; }
+    .row-main > button { flex:0 0 auto; width:100%; }
+    .modal-body { padding: 0 10px 10px; }
+    .hr-frame { min-height: 68vh; }
+  }
+</style>
 </head>
 <body>
   <div class="wrap">
-    <div class="topcard">
-      <h2 id="titleH2" style="margin: 6px 0 6px;">Movement status by license plate</h2>
+    <div class="topbar">
+      <div class="topleft">
+        <img src="/img/FedEx_Express-Logo.wine.svg" alt="FedEx Express" class="logo-img" />
+        <div class="toptext">
+          <strong>FedEx Express</strong>
+          <small>Driver Portal</small>
+        </div>
+      </div>
       <div class="langbar" id="langbar" aria-label="Language">
         <button class="flagbtn" data-lang="en" title="English" aria-label="English">🇬🇧</button>
         <button class="flagbtn" data-lang="de" title="Deutsch" aria-label="Deutsch">🇩🇪</button>
@@ -2441,47 +2500,51 @@ INDEX_HTML = r"""<!doctype html>
         <button class="flagbtn" data-lang="ky" title="Кыргызча" aria-label="Кыргызча">🇰🇬</button>
         <button class="flagbtn" data-lang="be" title="Беларуская" aria-label="Беларуская">🇧🇾</button>
       </div>
-
-      <div class="row row-main">
-        <input id="plate" placeholder="Enter license plate (e.g. AB-123-CD)" />
-        <button id="btn" class="btn btn-primary">Check</button>
-      </div>
-
-      <div class="row" style="margin-top: 8px;">
-        <button id="btnNotify" class="btn btn-secondary" style="display:none;">Enable notifications</button>
-      </div>
-      <div id="notifyMsg" class="muted" style="margin-top:6px; display:none;"></div>
-
-      <div id="out" class="card" style="display:none;"></div>
     </div>
+
+    <section class="hero-card">
+      <div class="eyebrow">FedEx Driver Portal</div>
+      <h1 id="titleH2">Movement status by license plate</h1>
+      <div class="search-panel">
+        <div class="row row-main">
+          <input id="plate" placeholder="Enter license plate (e.g. AB-123-CD)" />
+          <button id="btn" class="btn btn-primary">Check</button>
+        </div>
+
+        <div class="row" style="margin-top: 8px;">
+          <button id="btnNotify" class="btn btn-secondary" style="display:none;">Enable notifications</button>
+        </div>
+        <div id="notifyMsg" class="muted" style="margin-top:6px; display:none;"></div>
+      </div>
+    </section>
+
+    <div id="out" class="card" style="display:none;"></div>
   </div>
 
   <!-- House rules / routes modal (shown once per server session per license plate) -->
   <div id="hrBackdrop" class="modal-backdrop" style="display:none;">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="hrTitle">
-      <div class="modal-header">
-        <div class="modal-title" id="hrTitle">House rules</div>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="hrTitle">
+    <div class="modal-header">
+      <div class="modal-title" id="hrTitle">House rules</div>
+    </div>
+    <div class="modal-body">
+      <div id="hrIntro" class="muted" style="margin:12px 0 10px;"></div>
+      <div id="hrText" class="hr-text"></div>
+
+      <div class="hr-accept">
+        <label class="switch" title="Accept">
+          <input id="hrAccept" type="checkbox" />
+          <span class="slider"></span>
+        </label>
+        <div id="hrAcceptLabel" class="hr-accept-label"></div>
       </div>
-      <div class="modal-body">
-        <div id="hrIntro" class="muted" style="margin-bottom:10px;"></div>
-        </div>
 
-        <div id="hrText" class="hr-text"></div>
-
-        <div class="hr-accept">
-          <label class="switch" title="Accept">
-            <input id="hrAccept" type="checkbox" />
-            <span class="slider"></span>
-          </label>
-          <div id="hrAcceptLabel" class="hr-accept-label"></div>
-        </div>
-
-        <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
-          <button id="hrContinue" class="btn btn-primary" disabled>Continue</button>
-        </div>
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
+        <button id="hrContinue" class="btn btn-primary" disabled>Continue</button>
       </div>
     </div>
   </div>
+</div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -4545,75 +4608,72 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function showHouseRulesModal(plate) {
-      const pack = _houseRulesPack();
-      const backdrop = document.getElementById("hrBackdrop");
-      const titleEl = document.getElementById("hrTitle");
-      const introEl = document.getElementById("hrIntro");
-      const textEl = document.getElementById("hrText");
-const acceptEl = document.getElementById("hrAccept");
-      const acceptLabelEl = document.getElementById("hrAcceptLabel");
-      const contBtn = document.getElementById("hrContinue");
+  const pack = _houseRulesPack();
+  const backdrop = document.getElementById("hrBackdrop");
+  const titleEl = document.getElementById("hrTitle");
+  const introEl = document.getElementById("hrIntro");
+  const textEl = document.getElementById("hrText");
+  const acceptEl = document.getElementById("hrAccept");
+  const acceptLabelEl = document.getElementById("hrAcceptLabel");
+  const contBtn = document.getElementById("hrContinue");
 
-      titleEl.textContent = pack.title || "House rules";
-      introEl.textContent = pack.intro || "";
-      acceptLabelEl.textContent = pack.accept || "I accept";
-      contBtn.textContent = pack.cont || "Continue";
-textEl.innerHTML = pack.html || "";
+  titleEl.textContent = pack.title || "House rules";
+  introEl.textContent = pack.intro || "";
+  acceptLabelEl.textContent = pack.accept || "I accept";
+  contBtn.textContent = pack.cont || "Continue";
+  textEl.innerHTML = `<iframe id="hrFrame" class="hr-frame" src="${API_BASE}/house-rules?embedded=1&lang=${encodeURIComponent(CURRENT_LANG)}" title="House rules" loading="eager"></iframe>`;
 
-      acceptEl.checked = false;
+  acceptEl.checked = false;
+  contBtn.disabled = true;
+
+  const onToggle = () => {
+    contBtn.disabled = !acceptEl.checked;
+  };
+
+  return new Promise((resolve) => {
+    const onContinue = async () => {
+      if (!acceptEl.checked) return;
+
       contBtn.disabled = true;
+      const contText = pack.cont || "Continue";
+      contBtn.textContent = contText + "…";
 
-      const onToggle = () => {
-        contBtn.disabled = !acceptEl.checked;
-      };
+      try {
+        const res = await fetch(`${API_BASE}/api/house_rules_accept`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plate })
+        });
+        const data = await readJsonOrText(res);
 
-      return new Promise((resolve) => {
-        const onContinue = async () => {
-          if (!acceptEl.checked) return;
+        if (!res.ok) {
+          introEl.innerHTML = `<b>${t("err_error")}:</b> ${data.detail || res.statusText}`;
+          contBtn.textContent = contText;
+          contBtn.disabled = false;
+          return;
+        }
 
-          contBtn.disabled = true;
-          const contText = pack.cont || "Continue";
-          contBtn.textContent = contText + "…";
+        backdrop.style.display = "none";
+        cleanup();
+        contBtn.textContent = contText;
+        resolve(true);
+      } catch (e) {
+        introEl.innerHTML = `<b>${t("err_network")}:</b> ${e.message}`;
+        contBtn.textContent = pack.cont || "Continue";
+        contBtn.disabled = false;
+      }
+    };
 
-          try {
-            const res = await fetch(`${API_BASE}/api/house_rules_accept`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ plate })
-            });
-            const data = await readJsonOrText(res);
+    const cleanup = () => {
+      acceptEl.removeEventListener("change", onToggle);
+      contBtn.removeEventListener("click", onContinue);
+    };
 
-            if (!res.ok) {
-              introEl.innerHTML = `<b>${t("err_error")}:</b> ${data.detail || res.statusText}`;
-              contBtn.textContent = contText;
-              contBtn.disabled = false;
-              return;
-            }
-
-            backdrop.style.display = "none";
-            cleanup();
-            contBtn.textContent = contText;
-            resolve(true);
-          } catch (e) {
-            introEl.innerHTML = `<b>${t("err_network")}:</b> ${e.message}`;
-            contBtn.textContent = pack.cont || "Continue";
-            contBtn.disabled = false;
-          }
-        };
-
-        const cleanup = () => {
-          acceptEl.removeEventListener("change", onToggle);
-          contBtn.removeEventListener("click", onContinue);
-        };
-
-        acceptEl.addEventListener("change", onToggle);
-        contBtn.addEventListener("click", onContinue);
-
-        // block closing without acceptance (no outside click handler)
-        backdrop.style.display = "flex";
-      });
-    }
-
+    acceptEl.addEventListener("change", onToggle);
+    contBtn.addEventListener("click", onContinue);
+    backdrop.style.display = "flex";
+  });
+}
 
     function t(key) {
       const pack = UI[CURRENT_LANG] || UI.en;
