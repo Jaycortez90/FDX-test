@@ -1963,6 +1963,45 @@ def dev_summary(
     }
 
 
+@app.post("/api/dev/clear_cache")
+def dev_clear_cache(
+    key: str = Query(..., min_length=3, description="Developer key (DEV_PLATE)"),
+) -> Dict[str, Any]:
+    if normalize_plate(key) != DEV_PLATE:
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
+    cleared = {
+        "traffic_cache_entries": len(_TRAFFIC_CACHE),
+        "last_status_keys": len(LAST_STATUS_KEY_BY_PLATE),
+        "manual_statuses": len(MANUAL_STATUS_BY_PLATE),
+        "message_acks": len(MESSAGE_ACK_BY_PLATE),
+        "viewed_flags": len(VIEWED_BY_PLATE),
+        "house_rules_acceptances": len(HOUSE_RULES_ACCEPTED_BY_PLATE),
+        "check_log_events": len(CHECK_LOG),
+        "admin_push_dedup": len(LAST_ADMIN_CHECK_PUSH_TS_BY_PLATE),
+    }
+
+    _TRAFFIC_CACHE.clear()
+    LAST_STATUS_KEY_BY_PLATE.clear()
+    MANUAL_STATUS_BY_PLATE.clear()
+    MESSAGE_ACK_BY_PLATE.clear()
+    VIEWED_BY_PLATE.clear()
+    HOUSE_RULES_ACCEPTED_BY_PLATE.clear()
+    CHECK_LOG.clear()
+    LAST_ADMIN_CHECK_PUSH_TS_BY_PLATE.clear()
+
+    return {
+        "ok": True,
+        "cleared": cleared,
+        "kept": {
+            "snapshot_loaded": bool(SNAPSHOT),
+            "movement_count": len(_snapshot_movements()),
+            "subscription_buckets": len(SUBSCRIPTIONS_BY_PLATE),
+            "admin_notify_enabled": bool(ADMIN_NOTIFY_ENABLED),
+        },
+    }
+
+
 @app.post("/api/dev/admin_notify")
 def dev_set_admin_notify(
     key: str = Query(..., min_length=3, description="Developer key (DEV_PLATE)"),
@@ -4639,7 +4678,7 @@ INDEX_HTML = r"""<!doctype html>
       contBtn.textContent = contText + "…";
 
       try {
-        const res = await fetch(`${API_BASE}/api/house_rules_accept`, {
+        const res = await apiFetchNoStore(`${API_BASE}/api/house_rules_accept`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ plate })
@@ -4842,7 +4881,7 @@ INDEX_HTML = r"""<!doctype html>
 
       try {
         const url = `${API_BASE}/api/route?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}&lang=${encodeURIComponent(CURRENT_LANG)}`;
-        const res = await fetch(url);
+        const res = await apiFetchNoStore(url);
         const data = await readJsonOrText(res);
 
         if (!res.ok) {
@@ -4934,7 +4973,7 @@ INDEX_HTML = r"""<!doctype html>
 
       try {
         const url = `${API_BASE}/api/status?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}&lang=${encodeURIComponent(CURRENT_LANG)}`;
-        const res = await fetch(url);
+        const res = await apiFetchNoStore(url);
         const data = await readJsonOrText(res);
 
         if (!res.ok) {
@@ -5127,7 +5166,7 @@ INDEX_HTML = r"""<!doctype html>
           applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
         });
 
-        const resp = await fetch(`${API_BASE}/api/subscribe?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}&lang=${encodeURIComponent(CURRENT_LANG)}`, {
+        const resp = await apiFetchNoStore(`${API_BASE}/api/subscribe?plate=${encodeURIComponent(plate)}&lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}&ts=${encodeURIComponent(loc.ts)}&lang=${encodeURIComponent(CURRENT_LANG)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(sub),
@@ -5178,9 +5217,51 @@ INDEX_HTML = r"""<!doctype html>
       return String(iso || "-");
     }
 
+    function withNoCache(url) {
+      try {
+        const u = new URL(url, window.location.origin);
+        u.searchParams.set("_ts", String(Date.now()));
+        return u.toString();
+      } catch (e) {
+        const sep = String(url || "").includes("?") ? "&" : "?";
+        return `${url}${sep}_ts=${Date.now()}`;
+      }
+    }
+
+    async function apiFetchNoStore(url, options) {
+      const opts = Object.assign({}, options || {});
+      opts.cache = "no-store";
+      const headers = Object.assign({}, opts.headers || {});
+      headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+      headers["Pragma"] = "no-cache";
+      opts.headers = headers;
+      return await fetch(withNoCache(url), opts);
+    }
+
+    async function clearBrowserPortalCache() {
+      try { sessionStorage.clear(); } catch (e) {}
+      try { localStorage.removeItem("last_plate"); } catch (e) {}
+      try {
+        if (window.caches && caches.keys) {
+          const keys = await caches.keys();
+          for (const key of keys) {
+            try { await caches.delete(key); } catch (e) {}
+          }
+        }
+      } catch (e) {}
+      try {
+        if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const reg of (regs || [])) {
+            try { await reg.update(); } catch (e) {}
+          }
+        }
+      } catch (e) {}
+    }
+
     async function fetchDevSummary() {
       const url = `${API_BASE}/api/dev/summary?key=${encodeURIComponent(DEV_PLATE)}`;
-      const res = await fetch(url);
+      const res = await apiFetchNoStore(url);
       const data = await readJsonOrText(res);
       if (!res.ok) throw new Error(data.detail || res.statusText);
       return data;
@@ -5188,13 +5269,24 @@ INDEX_HTML = r"""<!doctype html>
 
     async function setAdminMonitorEnabled(enabled) {
       const url = `${API_BASE}/api/dev/admin_notify?key=${encodeURIComponent(DEV_PLATE)}`;
-      const res = await fetch(url, {
+      const res = await apiFetchNoStore(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !!enabled }),
       });
       const data = await readJsonOrText(res);
       if (!res.ok) throw new Error(data.detail || res.statusText);
+      return data;
+    }
+
+    async function clearDeveloperPortalCache() {
+      const url = `${API_BASE}/api/dev/clear_cache?key=${encodeURIComponent(DEV_PLATE)}`;
+      const res = await apiFetchNoStore(url, {
+        method: "POST",
+      });
+      const data = await readJsonOrText(res);
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+      await clearBrowserPortalCache();
       return data;
     }
 
@@ -5229,7 +5321,7 @@ INDEX_HTML = r"""<!doctype html>
         applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
       });
 
-      const resp = await fetch(`${API_BASE}/api/dev/subscribe_admin?key=${encodeURIComponent(DEV_PLATE)}&lang=${encodeURIComponent(CURRENT_LANG)}`, {
+      const resp = await apiFetchNoStore(`${API_BASE}/api/dev/subscribe_admin?key=${encodeURIComponent(DEV_PLATE)}&lang=${encodeURIComponent(CURRENT_LANG)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sub),
@@ -5250,7 +5342,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function sendAdminPlateMessage(plate, message) {
-      const resp = await fetch(`${API_BASE}/api/dev/send_message?key=${encodeURIComponent(DEV_PLATE)}`, {
+      const resp = await apiFetchNoStore(`${API_BASE}/api/dev/send_message?key=${encodeURIComponent(DEV_PLATE)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plate, message }),
@@ -5328,6 +5420,7 @@ INDEX_HTML = r"""<!doctype html>
             <div class="muted">Plates checked in the last 12 hours</div>
           </div>
           <div class="row" style="flex:0 0 auto;">
+            <button id="devClearCache" class="btn btn-secondary" style="min-width:140px;">Clear cache</button>
             <button id="devRefresh" class="btn btn-secondary" style="min-width:120px;">Refresh</button>
           </div>
         </div>
@@ -5361,6 +5454,29 @@ INDEX_HTML = r"""<!doctype html>
       // Hook buttons
       const rbtn = document.getElementById("devRefresh");
       if (rbtn) rbtn.onclick = () => refreshDeveloperView();
+
+      const cbtn = document.getElementById("devClearCache");
+      if (cbtn) {
+        cbtn.onclick = async () => {
+          const ok = window.confirm("Clear the portal cache now? This will remove stored site state so only fresh upload data is shown.");
+          if (!ok) return;
+
+          const oldLabel = cbtn.textContent || "Clear cache";
+          cbtn.disabled = true;
+          cbtn.textContent = "Clearing…";
+
+          try {
+            await clearDeveloperPortalCache();
+            setDevMsg("Portal cache cleared. Fresh upload data will be loaded on the next refresh.", false);
+            await refreshDeveloperView();
+          } catch (e) {
+            setDevMsg(String(e && e.message ? e.message : e), true);
+          } finally {
+            cbtn.disabled = false;
+            cbtn.textContent = oldLabel;
+          }
+        };
+      }
 
       const abtn = document.getElementById("btnAdminMonitor");
       if (abtn) {
