@@ -8,6 +8,7 @@ import urllib.request
 import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
+from threading import Lock
 
 from fastapi import FastAPI, HTTPException, Query, Request, Body
 from fastapi.responses import HTMLResponse, Response, FileResponse
@@ -171,6 +172,93 @@ ADMIN_NOTIFY_CHANGED_AT: str = ""
 # Simple de-duplication to avoid spamming admin on frequent refreshes
 LAST_ADMIN_CHECK_PUSH_TS_BY_PLATE: Dict[str, float] = {}
 ADMIN_CHECK_PUSH_DEDUP_SECONDS = 60
+
+# =============================
+# Service rating (persisted on disk)
+# =============================
+RATINGS_FILE = os.path.join(DATA_DIR, "service_ratings.json")
+RATING_LOCK = Lock()
+
+
+def _default_rating_counts() -> Dict[str, int]:
+    return {str(i): 0 for i in range(1, 6)}
+
+
+def _normalize_rating_counts(raw: Any) -> Dict[str, int]:
+    counts = _default_rating_counts()
+
+    src = raw
+    if isinstance(raw, dict) and isinstance(raw.get("counts"), dict):
+        src = raw.get("counts")
+
+    if isinstance(src, dict):
+        for i in range(1, 6):
+            key = str(i)
+            try:
+                counts[key] = max(0, int(src.get(key, src.get(i, 0)) or 0))
+            except Exception:
+                counts[key] = 0
+
+    return counts
+
+
+def _load_rating_counts() -> Dict[str, int]:
+    try:
+        if not os.path.exists(RATINGS_FILE):
+            return _default_rating_counts()
+
+        with open(RATINGS_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+
+        return _normalize_rating_counts(raw)
+    except Exception:
+        return _default_rating_counts()
+
+
+RATING_COUNTS: Dict[str, int] = _load_rating_counts()
+
+
+def _save_rating_counts() -> None:
+    tmp_path = RATINGS_FILE + ".tmp"
+    payload = {"counts": _normalize_rating_counts(RATING_COUNTS)}
+
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    os.replace(tmp_path, RATINGS_FILE)
+
+
+def _rating_summary_from_counts(counts: Dict[str, int]) -> Dict[str, Any]:
+    norm = _normalize_rating_counts(counts)
+    total_votes = sum(int(v or 0) for v in norm.values())
+    total_score = sum(int(score) * int(v or 0) for score, v in norm.items())
+    average = round((total_score / total_votes), 2) if total_votes else 0.0
+
+    return {
+        "counts": norm,
+        "total_votes": total_votes,
+        "average": average,
+    }
+
+
+def _get_rating_summary() -> Dict[str, Any]:
+    with RATING_LOCK:
+        counts = dict(RATING_COUNTS)
+    return _rating_summary_from_counts(counts)
+
+
+def _register_rating(score: int) -> Dict[str, Any]:
+    if score not in {1, 2, 3, 4, 5}:
+        raise HTTPException(status_code=400, detail="Score must be an integer from 1 to 5.")
+
+    with RATING_LOCK:
+        key = str(score)
+        RATING_COUNTS[key] = int(RATING_COUNTS.get(key, 0) or 0) + 1
+        _save_rating_counts()
+        counts = dict(RATING_COUNTS)
+
+    return _rating_summary_from_counts(counts)
+
 
 
 
@@ -1611,6 +1699,33 @@ def health() -> Dict[str, Any]:
         "lookup_locations_loaded": len(LOCATION_BY_CODE),
         "lookup_destland_loaded": len(DESTLAND_BY_CODE),
         "openpyxl_ok": _OPENPYXL_OK,
+        "rating": _get_rating_summary(),
+    }
+
+
+@app.get("/api/rating")
+def get_rating() -> Dict[str, Any]:
+    return {
+        "ok": True,
+        **_get_rating_summary(),
+    }
+
+
+@app.post("/api/rating")
+def submit_rating(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid payload.")
+
+    try:
+        score = int(payload.get("score"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Score must be an integer from 1 to 5.")
+
+    summary = _register_rating(score)
+    return {
+        "ok": True,
+        "selected": score,
+        **summary,
     }
 
 
@@ -2230,13 +2345,18 @@ def sw() -> Response:
 @app.get("/house-rules")
 def house_rules() -> Response:
     path = os.path.join(BASE_DIR, "index.html")
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="house rules page not found")
-    return FileResponse(path, media_type="text/html")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/html")
+    return HTMLResponse(INDEX_HTML)
+
 
 @app.get("/")
-def index() -> HTMLResponse:
+def index() -> Response:
+    path = os.path.join(BASE_DIR, "index.html")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/html")
     return HTMLResponse(INDEX_HTML)
+
 
 
 # -----------------------------
